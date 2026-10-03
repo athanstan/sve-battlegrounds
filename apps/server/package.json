@@ -1,0 +1,33 @@
+{
+  "name": "@sve/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative Colyseus server for SVE Battlegrounds.",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "build": "tsup",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@colyseus/core": "catalog:",
+    "@colyseus/schema": "catalog:",
+    "@colyseus/ws-transport": "catalog:",
+    "@sve/protocol": "workspace:*",
+    "@sve/rules": "workspace:*",
+    "@sve/cards": "workspace:*",
+    "@sve/shadowshowdown": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@colyseus/sdk": "catalog:",
+    "@colyseus/testing": "catalog:",
+    "@types/node": "catalog:",
+    "tsup": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
