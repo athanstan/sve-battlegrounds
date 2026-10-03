@@ -1,0 +1,26 @@
+{
+  "name": "@sve/playmat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PixiJS playmat: the only thing in the product that draws cards.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme": "./src/theme.ts",
+    "./testing": "./src/testing/views.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sve/rules": "workspace:*",
+    "gsap": "catalog:",
+    "pixi.js": "catalog:"
+  },
+  "devDependencies": {
+    "@sve/shadowshowdown": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
