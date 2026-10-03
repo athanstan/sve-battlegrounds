@@ -1,0 +1,116 @@
+import type { CardFilter, Place, Who } from './spec';
+import { definitionOf, effectiveDefinition, type MatchState } from '../state/state';
+import { opponentOf, type CardId, type Seat } from '../model/ids';
+
+export function resolveWho(controller: Seat, who: Who): readonly Seat[] {
+  if (who === 'you') return [controller];
+  if (who === 'opponent') return [opponentOf(controller)];
+  return [0, 1];
+}
+
+export function cardsAt(state: MatchState, controller: Seat, place: Place): CardId[] {
+  const seats = resolveWho(controller, place.who);
+  const ids: CardId[] = [];
+  for (const seat of seats) {
+    const s = state.seats[seat];
+    switch (place.zone) {
+      case 'field':
+        ids.push(...s.field.map((card) => card.id));
+        break;
+      case 'ex':
+        ids.push(...s.ex);
+        break;
+      case 'hand':
+        ids.push(...s.hand);
+        break;
+      case 'cemetery':
+        ids.push(...s.cemetery);
+        break;
+      case 'deck':
+        ids.push(...s.deck);
+        break;
+      case 'evolveDeck':
+        ids.push(...s.evolveDeck);
+        break;
+      case 'evolveDeckRevealed':
+        ids.push(...s.evolveDeckRevealed);
+        break;
+    }
+  }
+  return ids;
+}
+
+export function matchesFilter(
+  state: MatchState,
+  id: CardId,
+  filter?: CardFilter,
+  self?: CardId,
+): boolean {
+  if (!filter) return true;
+  const def = effectiveDefinition(state, id);
+  const printed = definitionOf(state, id);
+  if (filter.kind && !filter.kind.includes(def.kind)) return false;
+  if (filter.trait && !def.traits.includes(filter.trait)) return false;
+  if (filter.pixie && !def.traits.includes('Pixie')) return false;
+  if (filter.universe && def.universe !== filter.universe) return false;
+  if (filter.token !== undefined && Boolean(state.cards[id]?.token) !== filter.token) return false;
+  if (filter.name && def.name !== filter.name && printed.name !== filter.name) return false;
+  if (filter.costAtMost !== undefined && printed.cost > filter.costAtMost) return false;
+  if (filter.costIs !== undefined && printed.cost !== filter.costIs) return false;
+  if (filter.other && id === self) return false;
+  if (filter.evolved) {
+    const owner = state.cards[id]?.owner;
+    const linked =
+      owner !== undefined && state.seats[owner].evolveZone.some((link) => link.linkedTo === id);
+    if (!linked && def.special !== 'evolved') return false;
+  }
+  if (filter.faceUp !== undefined) {
+    const owner = state.cards[id]?.owner;
+    if (owner === undefined) return false;
+    const race = state.seats[owner].raceZone.find((link) => link.card === id);
+    if (race) {
+      if (Boolean(race.faceUp) !== filter.faceUp) return false;
+    } else if (filter.faceUp && !state.seats[owner].evolveDeckRevealed.includes(id)) {
+      return false;
+    } else if (!filter.faceUp && state.seats[owner].evolveDeckRevealed.includes(id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function gather(
+  state: MatchState,
+  controller: Seat,
+  places: readonly Place[],
+  filter: CardFilter | undefined,
+  self?: CardId,
+): CardId[] {
+  const seen = new Set<CardId>();
+  const out: CardId[] = [];
+  for (const place of places) {
+    for (const id of cardsAt(state, controller, place)) {
+      if (seen.has(id)) continue;
+      if (!matchesFilter(state, id, filter, self)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+export function countOf(spec: number | { readonly upTo: number } | 'any'): {
+  min: number;
+  max: number;
+} {
+  if (spec === 'any') return { min: 0, max: 64 };
+  if (typeof spec === 'number') return { min: spec, max: spec };
+  return { min: 0, max: spec.upTo };
+}
+
+export function asCardIds(vars: Readonly<Record<string, unknown>>, name: string): CardId[] {
+  const stored = vars[name];
+  if (typeof stored === 'string') return [stored as CardId];
+  if (Array.isArray(stored)) return stored.filter((id): id is CardId => typeof id === 'string');
+  return [];
+}
