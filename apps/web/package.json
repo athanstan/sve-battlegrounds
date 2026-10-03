@@ -1,0 +1,34 @@
+{
+  "name": "@sve/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "React + Tailwind chrome around the PixiJS playmat.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@colyseus/sdk": "catalog:",
+    "@fontsource-variable/inter": "^5.2.0",
+    "@fontsource/cinzel": "^5.2.0",
+    "@sve/playmat": "workspace:*",
+    "@sve/protocol": "workspace:*",
+    "@sve/rules": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
