@@ -1,0 +1,80 @@
+# SVE Battlegrounds next to shadowrates.
+#
+#   1. Start shadowrates once (its `sail up`), so its network and database exist.
+#   2. `docker compose up --build` here.
+#   3. Open http://localhost:5180
+#
+# The game server joins shadowrates' network to read its Postgres database (read-only), so
+# nothing here publishes or touches the ports shadowrates uses (80, 5173, 5432, 6379, 8080, ...).
+name: sve-battlegrounds
+
+x-source: &source
+  image: sve-battlegrounds:dev
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /app
+  volumes:
+    - .:/app
+    # Dependencies are installed for Linux inside the containers, never taken from the host's
+    # macOS node_modules, so each workspace folder gets its own named volume over the bind mount.
+    - node_modules_root:/app/node_modules
+    - node_modules_server:/app/apps/server/node_modules
+    - node_modules_web:/app/apps/web/node_modules
+    - node_modules_playmat:/app/packages/playmat/node_modules
+    - node_modules_protocol:/app/packages/protocol/node_modules
+    - node_modules_rules:/app/packages/rules/node_modules
+    - node_modules_shadowshowdown:/app/packages/shadowshowdown/node_modules
+    - node_modules_cards:/app/packages/cards/node_modules
+    - pnpm_store:/pnpm/store
+
+services:
+  # One-shot: brings the volumes in line with pnpm-lock.yaml, then exits.
+  deps:
+    <<: *source
+    command: pnpm install --frozen-lockfile
+
+  server:
+    <<: *source
+    command: pnpm --filter @sve/server dev
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+    environment:
+      PORT: 2567
+      WEB_ORIGIN: http://localhost:${SVE_WEB_PORT:-5180}
+      # `pgsql` is shadowrates' database service, reachable over its network.
+      SHADOWRATES_DATABASE_URL: postgres://${SHADOWRATES_DB_USER:-sail}:${SHADOWRATES_DB_PASSWORD:-secret}@pgsql:5432/${SHADOWRATES_DB_NAME:-shadowrates}
+      CARD_IMAGES_URL: ${CARD_IMAGES_URL:-https://shadowshowdown-card-images-ddrngr.s3.eu-north-1.amazonaws.com/cards}
+    ports:
+      - '${SVE_SERVER_PORT:-2567}:2567'
+    networks:
+      - default
+      - shadowrates
+
+  web:
+    <<: *source
+    command: pnpm --filter @sve/web exec vite --host 0.0.0.0
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+    environment:
+      WEB_PORT: ${SVE_WEB_PORT:-5180}
+    ports:
+      - '${SVE_WEB_PORT:-5180}:${SVE_WEB_PORT:-5180}'
+
+networks:
+  shadowrates:
+    name: shadowrates_sail
+    external: true
+
+volumes:
+  node_modules_root:
+  node_modules_server:
+  node_modules_web:
+  node_modules_playmat:
+  node_modules_protocol:
+  node_modules_rules:
+  node_modules_shadowshowdown:
+  node_modules_cards:
+  pnpm_store:

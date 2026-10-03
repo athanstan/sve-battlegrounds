@@ -1,0 +1,18 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+.vite/
+.colyseus/
+
+# Local tooling state
+.impeccable/
+
+# Third-party reference material kept locally, not redistributed
+docs/SVEE-Comprehensive-Rules.pdf
+docs/style/

@@ -1,0 +1,35 @@
+packages:
+  - packages/*
+  - apps/*
+
+catalog:
+  '@colyseus/core': ^0.18.18
+  '@colyseus/schema': ^5.0.35
+  '@colyseus/sdk': ^0.18.4
+  '@colyseus/testing': ^0.18.6
+  '@colyseus/ws-transport': ^0.18.4
+  '@tailwindcss/vite': ^4.3.3
+  '@types/node': ^22.19.0
+  '@types/pg': ^8.15.5
+  '@types/react': ^19.2.0
+  '@types/react-dom': ^19.2.0
+  '@vitejs/plugin-react': ^6.1.1
+  colyseus: ^0.18.9
+  gsap: ^3.15.0
+  pg: ^8.16.3
+  pixi.js: ^8.22.0
+  react: ^19.3.0
+  react-dom: ^19.3.0
+  tailwindcss: ^4.3.3
+  tsup: ^8.5.1
+  tsx: ^4.23.15
+  typescript: ~6.0.3
+  vite: ^8.3.2
+  vitest: ^5.0.3
+  zod: ^4.6.5
+
+onlyBuiltDependencies:
+  - esbuild
+
+patchedDependencies:
+  '@colyseus/better-call@1.3.3': patches/@colyseus__better-call@1.3.3.patch
