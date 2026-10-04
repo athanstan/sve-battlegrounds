@@ -13,10 +13,11 @@ import {
 import { ALL_SCRIPTS, scriptDrift, scriptFor } from './registry';
 
 describe('playable decks', () => {
-  it('lists decks 909, 940 and 956 as plain ids and counts', () => {
-    expect(dumped.decks.map((deck) => deck.id)).toEqual(['909', '940', '956']);
+  it('lists decks 909, 920, 940 and 956 as plain ids and counts', () => {
+    expect(dumped.decks.map((deck) => deck.id)).toEqual(['909', '920', '940', '956']);
     expect(dumped.decks.map((deck) => deck.name)).toEqual([
       'On Curve All Day',
+      'Why is crafter at 1',
       'daiwa vodka 2026',
       'Wasteland Sword',
     ]);
@@ -52,9 +53,9 @@ describe('playable decks', () => {
     }
   });
 
-  it('accepts the three live decks under 6.1', () => {
+  it('accepts the four live decks under 6.1', () => {
     const catalog = fixtureCatalog();
-    for (const id of ['909', '940', '956']) {
+    for (const id of ['909', '920', '940', '956']) {
       expect(validateDeck(deckListOf(id), catalog), `deck ${id}`).toEqual([]);
     }
   });

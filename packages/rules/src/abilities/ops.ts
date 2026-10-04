@@ -16,7 +16,7 @@ import {
 import { discard, draw, engage, setResource } from '../engine/verbs';
 import { isSelection } from '../engine/queries';
 import { locate } from '../state/zones';
-import type { CardFilter, Instr, Place } from './spec';
+import type { CardFilter, Instr, LookPick, Place } from './spec';
 import { asCardIds, countOf, gather, matchesFilter } from './filters';
 import { evaluateCondition, evaluateValue } from './values';
 import { evolveFollower } from '../engine/evolve';
@@ -180,6 +180,74 @@ function selectPrompt(
   });
 }
 
+function lookGroups(instr: Extract<Instr, { op: 'lookTop' }>): readonly LookPick[] {
+  if (instr.picks && instr.picks.length > 0) return instr.picks;
+  return instr.pick ? [instr.pick] : [];
+}
+
+function lookWanted(pick: LookPick, available: number): { min: number; max: number } {
+  if (pick.n !== undefined) {
+    const n = Math.min(pick.n, available);
+    return { min: n, max: n };
+  }
+  return { min: 0, max: Math.min(pick.upTo ?? available, available) };
+}
+
+function lookPickedOf(frame: ResolveAbilityFrame): CardId[] {
+  return asCardIds(frame.vars, '__lookPicked');
+}
+
+function lookStepOf(frame: ResolveAbilityFrame): number {
+  return typeof frame.vars.__lookStep === 'number' ? frame.vars.__lookStep : 0;
+}
+
+function settleLookTop(
+  t: Transcript,
+  frame: ResolveAbilityFrame,
+  instr: Extract<Instr, { op: 'lookTop' }>,
+  picked: readonly CardId[],
+): ResolveAbilityFrame {
+  const seat = frame.seat;
+  const top = t.state.seats[seat].deck.slice(0, instr.n);
+  const rest = top.filter((id) => !picked.includes(id));
+  if (lookGroups(instr).some((group) => group.reveal) && picked.length > 0) {
+    t.emit({ type: 'cardsRevealed', seat, cards: picked });
+  }
+  if (picked.length > 0) {
+    moveCards(t, {
+      owner: seat,
+      cards: picked,
+      from: { zone: 'deck', seat },
+      to: { zone: 'hand', seat },
+      cause: 'look',
+    });
+  }
+  if (rest.length > 0 && instr.rest === 'bottom') {
+    moveCards(t, {
+      owner: seat,
+      cards: rest,
+      from: { zone: 'deck', seat },
+      to: { zone: 'deck', seat },
+      cause: 'look',
+      position: 'bottom',
+    });
+  }
+  if (rest.length > 0 && instr.rest === 'bury') {
+    moveCards(t, {
+      owner: seat,
+      cards: rest,
+      from: { zone: 'deck', seat },
+      to: { zone: 'cemetery', seat },
+      cause: 'bury',
+    });
+  }
+  return withVars(frame, {
+    look: picked,
+    __lookPicked: picked,
+    __lookStep: lookGroups(instr).length,
+  });
+}
+
 function roomFor(t: Transcript, seat: Seat, zone: 'field' | 'ex' | 'hand'): number {
   const s = t.state.seats[seat];
   if (zone === 'field') return Math.max(0, s.limits.field - s.field.length);
@@ -226,34 +294,36 @@ export function runOp(
       };
     }
     case 'lookTop': {
+      const groups = lookGroups(instr);
+      let step = lookStepOf(frame);
+      const already = lookPickedOf(frame);
       const top = t.state.seats[seat].deck.slice(0, instr.n);
-      const matching = instr.pick.filter
-        ? top.filter((id) => matchesFilter(t.state, id, instr.pick.filter, frame.source))
-        : top;
-      if (matching.length === 0 || instr.pick.upTo === 0) {
-        if (instr.rest === 'bottom' && top.length > 0) {
-          moveCards(t, {
-            owner: seat,
-            cards: top,
-            from: { zone: 'deck', seat },
-            to: { zone: 'deck', seat },
-            cause: 'look',
-            position: 'bottom',
-          });
+      while (step < groups.length) {
+        const group = groups[step];
+        if (!group) break;
+        const remaining = top.filter((id) => !already.includes(id));
+        const matching = group.filter
+          ? remaining.filter((id) => matchesFilter(t.state, id, group.filter, frame.source))
+          : remaining;
+        const { min, max } = lookWanted(group, matching.length);
+        if (max === 0) {
+          step += 1;
+          continue;
         }
-        return { kind: 'ok', frame: withVars(frame, { look: [] }) };
+        updateWork(t, withVars(frame, { __lookStep: step, __lookPicked: already }));
+        return {
+          kind: 'prompt',
+          prompt: asSelect(t, {
+            seat,
+            label: `Look at the top ${instr.n}`,
+            candidates: matching,
+            min,
+            max,
+            where: 'browser',
+          }),
+        };
       }
-      return {
-        kind: 'prompt',
-        prompt: asSelect(t, {
-          seat,
-          label: `Look at the top ${instr.n}`,
-          candidates: matching,
-          min: 0,
-          max: Math.min(instr.pick.upTo, matching.length),
-          where: 'browser',
-        }),
-      };
+      return { kind: 'ok', frame: settleLookTop(t, frame, instr, already) };
     }
     case 'draw': {
       const n = evaluateValue(t.state, seat, instr.n, frame.vars, frame.source);
@@ -582,6 +652,24 @@ export function runOp(
       setResource(t, seat, 'playPoints', t.state.seats[seat].resources.playPoints + instr.n);
       return { kind: 'ok', frame };
     }
+    case 'nextPlayCost': {
+      const id = t.state.playDiscounts.reduce((max, offer) => Math.max(max, offer.id), 0) + 1;
+      t.emit({
+        type: 'playDiscountOffered',
+        discount: {
+          id,
+          seat,
+          source: frame.source,
+          amount: instr.amount,
+          until: instr.thisTurn ? 'endOfTurn' : null,
+          ...(instr.filter ? { filter: instr.filter } : {}),
+        },
+      });
+      // The options the player sees are computed from the state, so the cards this makes
+      // affordable are offered (and shown as playable) when the main phase asks again.
+      refreshDerived(t);
+      return { kind: 'ok', frame };
+    }
     case 'gainEvolutionPoints': {
       setResource(
         t,
@@ -767,32 +855,21 @@ runOp.answer = (
       if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
       if (prompt.kind !== 'selectCards') return REJECTED;
       if (!isSelection(intent.choice.cards, prompt.candidates)) return REJECTED;
-      const top = t.state.seats[seat].deck.slice(0, instr.n);
-      const picked = intent.choice.cards.filter((id) => top.includes(id));
-      const rest = top.filter((id) => !picked.includes(id));
-      if (instr.pick.reveal && picked.length > 0) {
-        t.emit({ type: 'cardsRevealed', seat, cards: picked });
+      if (intent.choice.cards.length < prompt.min || intent.choice.cards.length > prompt.max) {
+        return REJECTED;
       }
-      if (picked.length > 0) {
-        moveCards(t, {
-          owner: seat,
-          cards: picked,
-          from: { zone: 'deck', seat },
-          to: { zone: 'hand', seat },
-          cause: 'look',
-        });
+      const groups = lookGroups(instr);
+      const already = lookPickedOf(frame);
+      const picked = [...already, ...intent.choice.cards];
+      const next = lookStepOf(frame) + 1;
+      if (next >= groups.length) {
+        return { accepted: true, frame: settleLookTop(t, frame, instr, picked) };
       }
-      if (rest.length > 0 && instr.rest === 'bottom') {
-        moveCards(t, {
-          owner: seat,
-          cards: rest,
-          from: { zone: 'deck', seat },
-          to: { zone: 'deck', seat },
-          cause: 'look',
-          position: 'bottom',
-        });
-      }
-      return { accepted: true, frame: withVars(frame, { look: picked }) };
+      return {
+        accepted: true,
+        frame: withVars(frame, { __lookPicked: picked, __lookStep: next }),
+        advance: false,
+      };
     }
     case 'discard': {
       if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;

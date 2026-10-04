@@ -8,7 +8,8 @@ boxes are done; the rest is open.
 
 The playable decks in `packages/cards/fixtures/decks.json` (printing ids and counts only; every
 card fact lives in the deck-independent `cards.json` catalog) are decks **909** (_On Curve All Day_,
-Forestcraft, leader Arisa), **940** (_daiwa vodka 2026_, Umamusume, leader Special Week), and
+Forestcraft, leader Arisa), **920** (_Why is crafter at 1_, Runecraft, leader Anne & Grea, Bonds
+Everlasting), **940** (_daiwa vodka 2026_, Umamusume, leader Special Week), and
 **956** (_Wasteland Sword_, Swordcraft, leader Aurelia, Blooming Blade). Scripts
 are keyed by `CardDefinition.key` (slug + `@evolved`/`@token` + `#a`/`#b` for double-faced faces).
 Printed names stay as they are: a corresponding evolve card is still the one that shares a name

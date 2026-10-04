@@ -3,7 +3,10 @@ import { asCardDefId } from '../model/ids';
 
 const token = (
   name: string,
-  spec: Pick<CardDefinition, 'kind' | 'cardClass' | 'cost' | 'attack' | 'defense' | 'traits' | 'keywords' | 'text'>,
+  spec: Pick<
+    CardDefinition,
+    'kind' | 'cardClass' | 'cost' | 'attack' | 'defense' | 'traits' | 'keywords' | 'text'
+  >,
 ): CardDefinition => ({
   id: asCardDefId(`token:${name.replace(/\s+/g, '')}`),
   key: cardKey(name, 'token'),
@@ -74,6 +77,16 @@ export const DEFAULT_TOKENS: Readonly<Record<string, CardDefinition>> = {
     attack: null,
     defense: null,
     keywords: ['strike', 'storm'],
-    text: '[act]\n[engage] a Bunny & Baron, Specter Duo on your field:\nManeuver this card. (For the rest of this turn, it becomes a follower with\n[attack]3/[defense]3.)\n[act]\n[cost01], [engage] 2 followers on your field:\nManeuver this card.\nStorm.\nStrike - If there\'s another Wasteland follower on your field, draw a card.',
+    text: "[act]\n[engage] a Bunny & Baron, Specter Duo on your field:\nManeuver this card. (For the rest of this turn, it becomes a follower with\n[attack]3/[defense]3.)\n[act]\n[cost01], [engage] 2 followers on your field:\nManeuver this card.\nStorm.\nStrike - If there's another Wasteland follower on your field, draw a card.",
+  }),
+  'Mysterian Missile': token('Mysterian Missile', {
+    kind: 'spell',
+    cardClass: 'runecraft',
+    traits: ['Mage', 'Academic'],
+    cost: 2,
+    attack: null,
+    defense: null,
+    keywords: [],
+    text: 'Select an enemy follower on the field and deal it 3 damage. If there are at least 10 Academic cards in your cemetery, deal 2 damage to its leader.',
   }),
 };

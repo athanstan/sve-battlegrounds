@@ -265,13 +265,19 @@ export class CardActor extends Container {
 
     const shown = slot.shown;
     const faceUp = showFace;
-    const onField = slot.zone === 'field' && shown !== null && faceUp;
-    this.#atk.visible = onField;
-    this.#def.visible = onField;
-    if (onField && shown) {
-      const printed = this.#art.catalog()(
-        slot.evolved?.ref.def ?? slot.ref?.def ?? ('' as CardDefId),
-      );
+    const printed = this.#art.catalog()(
+      slot.evolved?.ref.def ?? slot.ref?.def ?? ('' as CardDefId),
+    );
+    const showStats =
+      shown !== null &&
+      faceUp &&
+      (slot.zone === 'field' ||
+        (slot.zone === 'ex' &&
+          typeof printed?.attack === 'number' &&
+          typeof printed?.defense === 'number'));
+    this.#atk.visible = showStats;
+    this.#def.visible = showStats;
+    if (showStats && shown) {
       this.#atk.text = String(shown.attack);
       this.#def.text = String(shown.defense);
       this.#atk.style.fill =
@@ -305,7 +311,7 @@ export class CardActor extends Container {
       this.#keys.visible = false;
     }
 
-    const raced = onField ? slot.racedTimes : 0;
+    const raced = slot.zone === 'field' ? slot.racedTimes : 0;
     this.#carrot.visible = raced > 0;
     this.#carrotCount.visible = raced > 1;
     if (raced > 0) {

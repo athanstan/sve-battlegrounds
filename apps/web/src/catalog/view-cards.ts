@@ -11,7 +11,7 @@ export function definitionsIn(view: MatchView): CardDefId[] {
     refs.push(seat.leader.card);
     refs.push(...(seat.hand.cards ?? []));
     refs.push(...seat.field.map((entry) => entry.card));
-    refs.push(...seat.ex, ...seat.cemetery);
+    refs.push(...seat.ex.map((entry) => entry.card), ...seat.cemetery);
     refs.push(...seat.banished.map((entry) => entry.card));
     refs.push(...seat.evolveZone.map((link) => link.card));
     refs.push(...seat.raceZone.map((link) => link.card));

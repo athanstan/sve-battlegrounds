@@ -56,7 +56,7 @@ export interface CardSlot {
   readonly engaged: boolean;
   /** The evolved form standing in this slot, if any. */
   readonly evolved: { readonly ref: CardRef; readonly superEvolved: boolean } | null;
-  /** Field stats the engine currently shows; null off the field. */
+  /** Field and EX stats the engine currently shows; null in piles and hands. */
   readonly shown: ShownStats | null;
   readonly racedTimes: number;
   readonly counters: Readonly<Record<string, number>>;
@@ -248,17 +248,18 @@ export function computeLayout(view: MatchView, camera: Camera): Layout {
     });
 
     // ---- EX: always face up, public to everyone (4.7) --------------------------------
-    data.ex.forEach((ref, index) => {
+    data.ex.forEach((entry, index) => {
       cards.push({
-        key: cardKey(ref.id),
+        key: cardKey(entry.card.id),
         seat,
         zone: 'ex',
-        ref,
+        ref: entry.card,
         pose: rowPose(camera, rows.ex, index, data.ex.length, SPACING.ex, SCALE.ex),
         z: Z.ex + index,
         flat: FLAT.table,
         index,
         ...rest,
+        shown: entry.shown,
       });
     });
 

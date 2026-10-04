@@ -34,6 +34,12 @@ export interface FieldCardView {
   readonly equipped: readonly CardRef[];
 }
 
+/** A public EX card. Followers carry live stats so off-field buffs (Fairy Dancer, Amataz) show. */
+export interface ExCardView {
+  readonly card: CardRef;
+  readonly shown: ShownStats;
+}
+
 export interface EvolveLinkView {
   readonly card: CardRef;
   readonly linkedTo: CardId;
@@ -61,7 +67,7 @@ export interface SeatView {
   readonly evolveDeck: EvolveDeckView;
   readonly hand: CountedZone;
   readonly field: readonly FieldCardView[];
-  readonly ex: readonly CardRef[];
+  readonly ex: readonly ExCardView[];
   readonly cemetery: readonly CardRef[];
   readonly banished: readonly BanishedView[];
   readonly evolveZone: readonly EvolveLinkView[];

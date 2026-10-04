@@ -1,7 +1,8 @@
 import type { CardId, CardRef, Seat } from '../model/ids';
 import { refOf, type MatchState, type Prompt } from '../state/state';
+import { instanceShown } from '../state/shown';
 import { canSeeEvolveDeck, canSeeHand, isAddressedBy, type Viewer } from './viewer';
-import type { MatchView, PromptSummary, SeatView, Snapshot } from './view';
+import type { ExCardView, MatchView, PromptSummary, SeatView, Snapshot } from './view';
 
 export function cardRef(state: MatchState, id: CardId): CardRef {
   return refOf(state, id);
@@ -9,6 +10,9 @@ export function cardRef(state: MatchState, id: CardId): CardRef {
 
 const refs = (state: MatchState, ids: readonly CardId[]): CardRef[] =>
   ids.map((id) => cardRef(state, id));
+
+const exRefs = (state: MatchState, ids: readonly CardId[]): ExCardView[] =>
+  ids.map((id) => ({ card: cardRef(state, id), shown: instanceShown(state, id) }));
 
 function projectSeat(state: MatchState, seat: Seat, viewer: Viewer): SeatView {
   const s = state.seats[seat];
@@ -36,7 +40,7 @@ function projectSeat(state: MatchState, seat: Seat, viewer: Viewer): SeatView {
       counters: fieldCard.counters,
       equipped: refs(state, fieldCard.equipped),
     })),
-    ex: refs(state, s.ex),
+    ex: exRefs(state, s.ex),
     cemetery: refs(state, s.cemetery),
     banished: s.banished.map((entry) => ({
       card: entry.faceDown ? null : cardRef(state, entry.id),

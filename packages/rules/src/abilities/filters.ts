@@ -6,6 +6,7 @@ import {
   type FieldCard,
   type MatchState,
 } from '../state/state';
+import { instanceShown } from '../state/shown';
 import { opponentOf, type CardId, type Seat } from '../model/ids';
 
 export function resolveWho(controller: Seat, who: Who): readonly Seat[] {
@@ -152,9 +153,9 @@ export function matchesFilter(
     const field = fieldCardOf(state, id);
     if (!field || field.damageTaken > 0 !== filter.damaged) return false;
   }
-  const shown = fieldCardOf(state, id)?.shown;
-  const attack = shown?.attack ?? def.attack ?? 0;
-  const defense = shown?.defense ?? def.defense ?? 0;
+  const shown = fieldCardOf(state, id)?.shown ?? instanceShown(state, id);
+  const attack = shown.attack;
+  const defense = shown.defense;
   if (filter.attackAtLeast !== undefined && attack < filter.attackAtLeast) return false;
   if (filter.attackAtMost !== undefined && attack > filter.attackAtMost) return false;
   if (filter.defenseAtLeast !== undefined && defense < filter.defenseAtLeast) return false;
@@ -201,8 +202,8 @@ function attrOf(state: MatchState, id: CardId, attr: 'attack' | 'defense' | 'cos
   const def = definitionOf(state, id);
   if (attr === 'cost') return def.cost;
   const field = fieldCardOf(state, id);
-  if (attr === 'attack') return field?.shown.attack ?? def.attack ?? 0;
-  return field?.shown.defense ?? def.defense ?? 0;
+  const shown = field?.shown ?? instanceShown(state, id);
+  return attr === 'attack' ? shown.attack : shown.defense;
 }
 
 export function countOf(spec: number | { readonly upTo: number } | 'any'): {

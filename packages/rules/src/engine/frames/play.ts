@@ -1,4 +1,5 @@
 import type { Intent } from '../../actions/intents';
+import type { CardId } from '../../model/ids';
 import { definitionOf, type Prompt } from '../../state/state';
 import type { PlayCardFrame } from '../../state/work';
 import { REJECTED, type AnswerResult, type PromptRequest } from '../steps/step';
@@ -13,6 +14,60 @@ import { refOf } from '../../state/state';
 import type { Instr, SpellAbility } from '../../abilities/spec';
 import { gather, matchesFilter } from '../../abilities/filters';
 import { discard } from '../verbs';
+import {
+  additionalCostOf,
+  costParts,
+  extraCostCandidates,
+  extraCostPick,
+  pickedCostParts,
+  type AtomicCost,
+} from '../../abilities/costs';
+import { playDiscountsFor } from '../../abilities/statics';
+import { payAbilityCost } from '../pay-cost';
+
+type PickedPart = ReturnType<typeof pickedCostParts>[number];
+
+const costStepOf = (frame: PlayCardFrame): number =>
+  typeof frame.vars.__costStep === 'number' ? frame.vars.__costStep : 0;
+
+const costPickedOf = (frame: PlayCardFrame): readonly CardId[] =>
+  Array.isArray(frame.vars.__costPicked) ? (frame.vars.__costPicked as CardId[]) : [];
+
+/** The next card-picking part of the additional cost, if any is left to ask. */
+function nextPickedPart(t: Transcript, frame: PlayCardFrame): PickedPart | undefined {
+  const cost = additionalCostOf(t.state, frame.card);
+  return cost ? pickedCostParts(cost)[costStepOf(frame)] : undefined;
+}
+
+/** What a picked part says it wants: "reveal 2 Academic cards" and which cards qualify. */
+function pickedSpec(part: PickedPart) {
+  return 'reveal' in part
+    ? { verb: 'Reveal', ...part.reveal }
+    : { verb: 'Discard', ...part.discard };
+}
+
+function pickedCandidates(t: Transcript, frame: PlayCardFrame, part: PickedPart): CardId[] {
+  const { filter } = pickedSpec(part);
+  const taken = costPickedOf(frame);
+  return t.state.seats[frame.seat].hand.filter(
+    (id) =>
+      id !== frame.card && !taken.includes(id) && matchesFilter(t.state, id, filter, frame.card),
+  );
+}
+
+function pickedLabel(part: PickedPart): string {
+  const { verb, n, filter } = pickedSpec(part);
+  const what = [filter?.trait, filter?.universe, filter?.kind?.join(' or ')].filter(Boolean);
+  return `${verb} ${n} ${what.length > 0 ? `${what.join(' ')} ` : ''}${
+    n === 1 ? 'card' : 'cards'
+  } from your hand (additional cost)`;
+}
+
+/** Everything in the additional cost that needs no decision: play points, Leader defense… */
+function settledParts(t: Transcript, card: CardId): AtomicCost[] {
+  const cost = additionalCostOf(t.state, card);
+  return cost ? costParts(cost).filter((part) => !('reveal' in part) && !('discard' in part)) : [];
+}
 
 function playEffect(t: Transcript, card: PlayCardFrame['card']): readonly Instr[] {
   const def = definitionOf(t.state, card);
@@ -34,22 +89,15 @@ function chooseOne(effect: readonly Instr[]): Extract<Instr, { op: 'chooseOne' }
   );
 }
 
-function extraCostOf(t: Transcript, card: PlayCardFrame['card']): SpellAbility['extraCost'] | undefined {
+function extraCostOf(
+  t: Transcript,
+  card: PlayCardFrame['card'],
+): SpellAbility['extraCost'] | undefined {
   const def = definitionOf(t.state, card);
   if (def.kind !== 'spell') return undefined;
   const script = t.state.scripts[def.id];
   const spell = script?.abilities.find((ability) => ability.kind === 'spell');
   return spell?.kind === 'spell' ? spell.extraCost : undefined;
-}
-
-function extraCandidates(
-  t: Transcript,
-  frame: PlayCardFrame,
-  extra: NonNullable<SpellAbility['extraCost']>,
-) {
-  return t.state.seats[frame.seat].hand.filter((id) =>
-    matchesFilter(t.state, id, extra.discard.filter, frame.card),
-  );
 }
 
 function targetSelects(effect: readonly Instr[]): Extract<Instr, { op: 'select' }>[] {
@@ -89,9 +137,30 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
             })),
           };
         }
-        current = { ...current, stage: 'extraCost' };
+        current = { ...current, stage: 'additionalCost' };
         updateWork(t, current);
         continue;
+      }
+      case 'additionalCost': {
+        // 10.6.2.2: the cards the cost names are chosen now, before targets and payment.
+        const part = nextPickedPart(t, current);
+        if (!part) {
+          current = { ...current, stage: 'extraCost' };
+          updateWork(t, current);
+          continue;
+        }
+        const candidates = pickedCandidates(t, current, part);
+        const n = Math.min(pickedSpec(part).n, candidates.length);
+        return {
+          kind: 'selectCards',
+          seat: current.seat,
+          label: pickedLabel(part),
+          candidates,
+          previews: candidates.map((id) => refOf(t.state, id)),
+          min: n,
+          max: n,
+          where: 'mat',
+        };
       }
       case 'extraCost': {
         const extra = extraCostOf(t, current.card);
@@ -100,7 +169,8 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
           updateWork(t, current);
           continue;
         }
-        const candidates = extraCandidates(t, current, extra);
+        const pick = extraCostPick(extra);
+        const candidates = extraCostCandidates(t.state, current.seat, current.card, extra);
         if (current.vars.__extraPicking === true) {
           return {
             kind: 'selectCards',
@@ -108,15 +178,15 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
             label: extra.label,
             candidates,
             previews: candidates.map((id) => refOf(t.state, id)),
-            min: extra.discard.n,
-            max: extra.discard.n,
-            where: 'mat',
+            min: pick.n,
+            max: pick.n,
+            where: pick.where,
           };
         }
         const full = playCost(t.state, current.card);
         const mustPay = full > t.state.seats[current.seat].resources.playPoints;
         if (mustPay) {
-          if (candidates.length < extra.discard.n) {
+          if (candidates.length < pick.n) {
             current = { ...current, vars: { ...current.vars, __extraCostDone: true } };
             updateWork(t, current);
             continue;
@@ -179,6 +249,12 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
         const full = playCost(t.state, current.card);
         const paid = current.vars.__extraPaid === true && extra ? extra.reduceBy : 0;
         payPlayPoints(t, current.seat, Math.max(0, full - paid));
+        payAbilityCost(t, current.seat, current.card, { list: settledParts(t, current.card) });
+        // "The next card you play costs N less" is used up by the card it just discounted.
+        const offers = playDiscountsFor(t.state, current.card);
+        if (offers.length > 0) {
+          t.emit({ type: 'playDiscountSpent', ids: offers.map((offer) => offer.id) });
+        }
         t.emit({
           type: 'cardPlayed',
           seat: current.seat,
@@ -312,6 +388,27 @@ export function answerPlayCard(
     });
     return { accepted: true, followUp: null };
   }
+  if (frame.stage === 'additionalCost') {
+    if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
+    if (prompt.kind !== 'selectCards') return REJECTED;
+    const part = nextPickedPart(t, frame);
+    if (!part) return REJECTED;
+    const picked = intent.choice.cards;
+    if (!isSelection(picked, prompt.candidates)) return REJECTED;
+    if (picked.length < prompt.min || picked.length > prompt.max) return REJECTED;
+    // Revealing shows the cards and leaves them where they are; discarding moves them.
+    if ('reveal' in part) t.emit({ type: 'cardsRevealed', seat: frame.seat, cards: picked });
+    else discard(t, frame.seat, picked);
+    updateWork(t, {
+      ...frame,
+      vars: {
+        ...frame.vars,
+        __costStep: costStepOf(frame) + 1,
+        __costPicked: [...costPickedOf(frame), ...picked],
+      },
+    });
+    return { accepted: true, followUp: null };
+  }
   if (frame.stage === 'targets') {
     if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
     if (prompt.kind !== 'selectCards') return REJECTED;
@@ -343,9 +440,24 @@ export function answerPlayCard(
     }
     if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
     if (prompt.kind !== 'selectCards') return REJECTED;
+    const pick = extraCostPick(extra);
     if (!isSelection(intent.choice.cards, prompt.candidates)) return REJECTED;
-    if (intent.choice.cards.length !== extra.discard.n) return REJECTED;
-    discard(t, frame.seat, intent.choice.cards);
+    if (intent.choice.cards.length !== pick.n) return REJECTED;
+    if (pick.kind === 'banish') {
+      for (const id of intent.choice.cards) {
+        const from = zoneOf(t.state, id);
+        const owner = t.state.cards[id]?.owner ?? frame.seat;
+        moveCards(t, {
+          owner,
+          cards: [id],
+          from,
+          to: { zone: 'banished', seat: owner },
+          cause: 'banish',
+        });
+      }
+    } else {
+      discard(t, frame.seat, intent.choice.cards);
+    }
     updateWork(t, {
       ...frame,
       vars: {

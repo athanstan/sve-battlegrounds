@@ -17,6 +17,9 @@ import {
 } from '../testing/support';
 import { createMatch } from './create';
 import { reduce } from './reduce';
+import { DEFAULT_TOKENS } from '../abilities/tokens';
+import { project } from '../views/project';
+import { seatViewer } from '../views/viewer';
 
 const promptOf = (state: MatchState): Prompt => {
   if (!state.prompt) throw new Error('Expected an open prompt');
@@ -479,7 +482,13 @@ describe('live-deck engine gaps', () => {
       key: cardKey('Test Follower 2'),
       name: 'Test Follower 2',
       textHash: textHash(spellText),
-      abilities: [{ kind: 'spell', key: 'spell', effect: [{ op: 'token', name: 'Fairy', n: 2, to: 'field' }] }],
+      abilities: [
+        {
+          kind: 'spell',
+          key: 'spell',
+          effect: [{ op: 'token', name: 'Fairy', n: 2, to: 'field' }],
+        },
+      ],
     };
     const card = asCardId('pair');
     const crafted: MatchState = {
@@ -499,8 +508,14 @@ describe('live-deck engine gaps', () => {
       cards: { ...run.state.cards, [card]: { id: card, def: spellId, owner: seat, token: false } },
       seats:
         seat === 0
-          ? [{ ...run.state.seats[0], hand: [...run.state.seats[0].hand, card] }, run.state.seats[1]]
-          : [run.state.seats[0], { ...run.state.seats[1], hand: [...run.state.seats[1].hand, card] }],
+          ? [
+              { ...run.state.seats[0], hand: [...run.state.seats[0].hand, card] },
+              run.state.seats[1],
+            ]
+          : [
+              run.state.seats[0],
+              { ...run.state.seats[1], hand: [...run.state.seats[1].hand, card] },
+            ],
     };
     const existing = promptOf(crafted);
     const prompt = {
@@ -727,11 +742,7 @@ describe('live-deck engine gaps', () => {
           ? [
               {
                 ...run.state.seats[0],
-                hand: [
-                  ...run.state.seats[0].hand,
-                  card,
-                  ...extraHand.map((entry) => entry.id),
-                ],
+                hand: [...run.state.seats[0].hand, card, ...extraHand.map((entry) => entry.id)],
                 resources: {
                   ...run.state.seats[0].resources,
                   playPoints: extras.playPoints ?? run.state.seats[0].resources.playPoints,
@@ -743,11 +754,7 @@ describe('live-deck engine gaps', () => {
               run.state.seats[0],
               {
                 ...run.state.seats[1],
-                hand: [
-                  ...run.state.seats[1].hand,
-                  card,
-                  ...extraHand.map((entry) => entry.id),
-                ],
+                hand: [...run.state.seats[1].hand, card, ...extraHand.map((entry) => entry.id)],
                 resources: {
                   ...run.state.seats[1].resources,
                   playPoints: extras.playPoints ?? run.state.seats[1].resources.playPoints,
@@ -859,6 +866,50 @@ describe('live-deck engine gaps', () => {
     expect(settled.state.seats[prepared.seat].deck[0]).toBe(top);
   });
 
+  it('buries the rest of a look-top pile after taking an exact count', () => {
+    const text = 'Look at the top 3. Reveal 2 and add them to your hand. Bury the rest.';
+    const script: CardScript = {
+      key: cardKey('Test Follower 2'),
+      name: 'Test Follower 2',
+      textHash: textHash(text),
+      abilities: [
+        {
+          kind: 'spell',
+          key: 'spell',
+          effect: [
+            {
+              op: 'lookTop',
+              n: 3,
+              pick: { n: 2, reveal: true, then: 'hand' },
+              rest: 'bury',
+            },
+          ],
+        },
+      ],
+    };
+    const prepared = withSpell(atFirstMainPhase('look-rest-bury'), script, text);
+    const top = prepared.run.state.seats[prepared.seat].deck.slice(0, 3);
+    const afterPlay = must(prepared.run, {
+      seat: prepared.seat,
+      intent: { type: 'play', promptId: promptOf(prepared.run.state).id, card: prepared.card },
+    });
+    expect(promptOf(afterPlay.state)).toMatchObject({ kind: 'selectCards', min: 2, max: 2 });
+    const kept = top.slice(0, 2);
+    const buried = top[2];
+    const afterPick = must(afterPlay, {
+      seat: prepared.seat,
+      intent: {
+        type: 'choose',
+        promptId: promptOf(afterPlay.state).id,
+        choice: { kind: 'selectCards', cards: kept },
+      },
+    });
+    const settled = playUntil(afterPick, (state) => state.prompt?.kind === 'main');
+    expect(settled.state.seats[prepared.seat].hand).toEqual(expect.arrayContaining(kept));
+    expect(settled.state.seats[prepared.seat].cemetery).toContain(buried);
+    expect(settled.state.seats[prepared.seat].deck[0]).not.toBe(buried);
+  });
+
   it('buries the top of the opponent deck and draws when buried cards share a base cost', () => {
     const text = 'Bury the top 2. If their costs match, draw. The opponent buries 1.';
     const script: CardScript = {
@@ -894,8 +945,14 @@ describe('live-deck engine gaps', () => {
       ...prepared.run.state,
       seats:
         seat === 0
-          ? [{ ...prepared.run.state.seats[0], deck: [...mine, ...rest] }, prepared.run.state.seats[1]]
-          : [prepared.run.state.seats[0], { ...prepared.run.state.seats[1], deck: [...mine, ...rest] }],
+          ? [
+              { ...prepared.run.state.seats[0], deck: [...mine, ...rest] },
+              prepared.run.state.seats[1],
+            ]
+          : [
+              prepared.run.state.seats[0],
+              { ...prepared.run.state.seats[1], deck: [...mine, ...rest] },
+            ],
     };
     const theirs = pinned.seats[foe].deck[0];
     const handBefore = pinned.seats[seat].hand.length;
@@ -914,7 +971,8 @@ describe('live-deck engine gaps', () => {
   });
 
   it('sums values from earlier steps and pays a choose-one option cost', () => {
-    const text = 'Choose one. (1) Return an ally: draw 2. (2) Draw the number of cards in hand and EX.';
+    const text =
+      'Choose one. (1) Return an ally: draw 2. (2) Draw the number of cards in hand and EX.';
     const script: CardScript = {
       key: cardKey('Test Follower 2'),
       name: 'Test Follower 2',
@@ -982,7 +1040,7 @@ describe('live-deck engine gaps', () => {
   });
 
   it('lets optional Last Words move the card itself to EX', () => {
-    const text = 'Last Words: You may put this card into its owner\'s EX area.';
+    const text = "Last Words: You may put this card into its owner's EX area.";
     const defId = asCardDefId('test-follower-1');
     const script: CardScript = {
       key: cardKey('Test Follower 1'),
@@ -1007,23 +1065,27 @@ describe('live-deck engine gaps', () => {
     const source = asCardId('aria');
     const onField = putOnField(atFirstMainPhase('last-words-ex'), source, defId, script, text);
     const spellText = 'Destroy each of your followers.';
-    const prepared = withSpell(onField, {
-      key: cardKey('Test Follower 2'),
-      name: 'Test Follower 2',
-      textHash: textHash(spellText),
-      abilities: [
-        {
-          kind: 'spell',
-          key: 'spell',
-          effect: [
-            {
-              op: 'destroy',
-              cards: { each: { zone: 'field', who: 'you' }, filter: { kind: ['follower'] } },
-            },
-          ],
-        },
-      ],
-    }, spellText);
+    const prepared = withSpell(
+      onField,
+      {
+        key: cardKey('Test Follower 2'),
+        name: 'Test Follower 2',
+        textHash: textHash(spellText),
+        abilities: [
+          {
+            kind: 'spell',
+            key: 'spell',
+            effect: [
+              {
+                op: 'destroy',
+                cards: { each: { zone: 'field', who: 'you' }, filter: { kind: ['follower'] } },
+              },
+            ],
+          },
+        ],
+      },
+      spellText,
+    );
     const afterPlay = must(prepared.run, {
       seat: prepared.seat,
       intent: { type: 'play', promptId: promptOf(prepared.run.state).id, card: prepared.card },
@@ -1099,7 +1161,15 @@ describe('swordcraft engine gaps', () => {
         seat === 0
           ? [
               { ...run.state.seats[0], hand: [...run.state.seats[0].hand, card] },
-              { ...run.state.seats[1], field: [{ ...fieldCard(enemy, 'reserved', 0), shown: { attack: 1, defense: 3, keywords: ['ward'] } }] },
+              {
+                ...run.state.seats[1],
+                field: [
+                  {
+                    ...fieldCard(enemy, 'reserved', 0),
+                    shown: { attack: 1, defense: 3, keywords: ['ward'] },
+                  },
+                ],
+              },
             ]
           : [
               {
@@ -1223,3 +1293,105 @@ describe('swordcraft engine gaps', () => {
   });
 });
 
+describe('EX instance buffs', () => {
+  it('gives +1/+1 to a Pixie token in EX and keeps it when that token is played', () => {
+    const text = 'Fanfare: Give +1/+1 to each Pixie follower in your EX area.';
+    const defId = asCardDefId('test-follower-0');
+    const script: CardScript = {
+      key: cardKey('Test Follower 0'),
+      name: 'Test Follower 0',
+      textHash: textHash(text),
+      abilities: [
+        {
+          kind: 'triggered',
+          key: 'fanfare',
+          on: 'fanfare',
+          effect: [
+            {
+              op: 'buff',
+              cards: {
+                each: { zone: 'ex', who: 'you' },
+                filter: { kind: ['follower'], pixie: true },
+              },
+              attack: 1,
+              defense: 1,
+            },
+          ],
+        },
+      ],
+    };
+    const run = atFirstMainPhase('ex-pixie-buff');
+    const seat = run.state.active!;
+    const proto = run.state.tokens.Fairy ?? DEFAULT_TOKENS.Fairy;
+    if (!proto) throw new Error('missing Fairy token');
+    const fairy = asCardId('ex-fairy');
+    const dancer = asCardId('dancer');
+    const current = run.state.seats[seat];
+    const crafted: MatchState = {
+      ...run.state,
+      defs: { ...run.state.defs, [defId]: { ...run.state.defs[defId]!, text } },
+      scripts: { ...run.state.scripts, [defId]: script },
+      cards: {
+        ...run.state.cards,
+        [fairy]: { id: fairy, def: proto.id, owner: seat, token: true },
+        [dancer]: { id: dancer, def: defId, owner: seat, token: false },
+      },
+      seats:
+        seat === 0
+          ? [
+              {
+                ...current,
+                ex: [...current.ex, fairy],
+                hand: [...current.hand, dancer],
+                resources: { ...current.resources, playPoints: 3, maxPlayPoints: 3 },
+              },
+              run.state.seats[1],
+            ]
+          : [
+              run.state.seats[0],
+              {
+                ...current,
+                ex: [...current.ex, fairy],
+                hand: [...current.hand, dancer],
+                resources: { ...current.resources, playPoints: 3, maxPlayPoints: 3 },
+              },
+            ],
+    };
+    const existing = promptOf(crafted);
+    const withPlay: MatchState = {
+      ...crafted,
+      prompt: {
+        ...existing,
+        kind: 'main',
+        options: [
+          ...(existing.kind === 'main' ? existing.options : []),
+          { type: 'play', card: dancer, cost: 1, from: 'hand' },
+        ],
+      },
+    };
+    const after = must(
+      { state: withPlay, events: run.events },
+      { seat, intent: { type: 'play', promptId: promptOf(withPlay).id, card: dancer } },
+    );
+    expect(after.state.cards[fairy]?.modifiers).toEqual([{ attack: 1, defense: 1, until: null }]);
+    const view = project(after.state, seatViewer(seat));
+    expect(view.seats[seat].ex.find((entry) => entry.card.id === fairy)?.shown).toEqual({
+      attack: 2,
+      defense: 2,
+      keywords: [],
+    });
+
+    const main = promptOf(after.state);
+    if (main.kind !== 'main') throw new Error('expected main');
+    const playFairy = main.options.find(
+      (option) => option.type === 'play' && option.card === fairy,
+    );
+    if (playFairy?.type !== 'play') throw new Error('Fairy in EX should be playable');
+    const summoned = must(after, {
+      seat,
+      intent: { type: 'play', promptId: main.id, card: fairy },
+    });
+    const onField = summoned.state.seats[seat].field.find((card) => card.id === fairy);
+    expect(onField?.shown).toEqual({ attack: 2, defense: 2, keywords: [] });
+  });
+});

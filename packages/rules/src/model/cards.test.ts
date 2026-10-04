@@ -19,12 +19,8 @@ describe('cardKey', () => {
   });
 
   it('keeps double-faced printings as two cards, keyed by collector a/b', () => {
-    expect(cardKey('Fortuna Regina', 'evolved', 'CP02-SP09aEN')).toBe(
-      'fortuna-regina@evolved#a',
-    );
-    expect(cardKey('Fortuna Regina', 'evolved', 'CP02-SP09bEN')).toBe(
-      'fortuna-regina@evolved#b',
-    );
+    expect(cardKey('Fortuna Regina', 'evolved', 'CP02-SP09aEN')).toBe('fortuna-regina@evolved#a');
+    expect(cardKey('Fortuna Regina', 'evolved', 'CP02-SP09bEN')).toBe('fortuna-regina@evolved#b');
   });
 
   it('folds punctuation and ligatures into a slug', () => {
@@ -49,8 +45,8 @@ describe('keywordsFromText', () => {
   });
 
   it('reads several keywords on one line (Viridia Magna)', () => {
-    expect(keywordsFromText('Rush. Assail. Bane.\nlastwords Banish a Naterran Great Tree.')).toEqual(
-      ['rush', 'assail', 'bane'],
-    );
+    expect(
+      keywordsFromText('Rush. Assail. Bane.\nlastwords Banish a Naterran Great Tree.'),
+    ).toEqual(['rush', 'assail', 'bane']);
   });
 });

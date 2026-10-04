@@ -47,21 +47,40 @@ import * as m44 from './swordcraft/tyrant-s-order';
 import * as m45 from './swordcraft/unbridled-fury';
 import * as m46 from './swordcraft/val-trusty-getaway-car';
 import * as m47 from './runecraft/agnes-tachyon';
-import * as m48 from './runecraft/cheval-grand';
-import * as m49 from './runecraft/daiwa-scarlet';
-import * as m50 from './runecraft/lamplit-training-of-a-witch-to-be';
-import * as m51 from './runecraft/lucky-star-in-the-sky';
-import * as m52 from './runecraft/make-some-noise';
-import * as m53 from './runecraft/sweep-tosho';
-import * as m54 from './runecraft/vodka';
-import * as m55 from './dragoncraft/pious-flame-heavens-scorcher';
-import * as m56 from './dragoncraft/special-week-the-brightest-star-in-japan';
-import * as m57 from './abysscraft/7-more-centimeters';
-import * as m58 from './abysscraft/air-shakur';
-import * as m59 from './abysscraft/hishi-miracle';
-import * as m60 from './abysscraft/manhattan-cafe';
-import * as m61 from './abysscraft/matikanetannhauser-machitan-adventure';
-import * as m62 from './abysscraft/my-solo-drawn-to-raindrop-drums';
+import * as m48 from './runecraft/anne-grea-bonds-everlasting';
+import * as m49 from './runecraft/chain-lightning';
+import * as m50 from './runecraft/chakram-wizard';
+import * as m51 from './runecraft/chaos-wielder';
+import * as m52 from './runecraft/cheval-grand';
+import * as m53 from './runecraft/crystal-fencer';
+import * as m54 from './runecraft/daiwa-scarlet';
+import * as m55 from './runecraft/daria-infinity-witch';
+import * as m56 from './runecraft/dimension-shift';
+import * as m57 from './runecraft/grimoire-sorcerer';
+import * as m58 from './runecraft/lamplit-training-of-a-witch-to-be';
+import * as m59 from './runecraft/lucky-star-in-the-sky';
+import * as m60 from './runecraft/make-some-noise';
+import * as m61 from './runecraft/melvie-princess-witch';
+import * as m62 from './runecraft/mr-bertrand-magic-mentor';
+import * as m63 from './runecraft/mysterian-knowledge';
+import * as m64 from './runecraft/mysterian-missile';
+import * as m65 from './runecraft/mystic-absorption';
+import * as m66 from './runecraft/riven-earth';
+import * as m67 from './runecraft/scorching-blast';
+import * as m68 from './runecraft/story-of-a-lifetime';
+import * as m69 from './runecraft/sweep-tosho';
+import * as m70 from './runecraft/truth-s-adjudication';
+import * as m71 from './runecraft/vodka';
+import * as m72 from './runecraft/witchbolt';
+import * as m73 from './runecraft/yukishima-master-biographer';
+import * as m74 from './dragoncraft/pious-flame-heavens-scorcher';
+import * as m75 from './dragoncraft/special-week-the-brightest-star-in-japan';
+import * as m76 from './abysscraft/7-more-centimeters';
+import * as m77 from './abysscraft/air-shakur';
+import * as m78 from './abysscraft/hishi-miracle';
+import * as m79 from './abysscraft/manhattan-cafe';
+import * as m80 from './abysscraft/matikanetannhauser-machitan-adventure';
+import * as m81 from './abysscraft/my-solo-drawn-to-raindrop-drums';
 
 export const SCRIPT_FILES: readonly string[] = [
   'neutral/a-super-successful-event',
@@ -112,13 +131,32 @@ export const SCRIPT_FILES: readonly string[] = [
   'swordcraft/unbridled-fury',
   'swordcraft/val-trusty-getaway-car',
   'runecraft/agnes-tachyon',
+  'runecraft/anne-grea-bonds-everlasting',
+  'runecraft/chain-lightning',
+  'runecraft/chakram-wizard',
+  'runecraft/chaos-wielder',
   'runecraft/cheval-grand',
+  'runecraft/crystal-fencer',
   'runecraft/daiwa-scarlet',
+  'runecraft/daria-infinity-witch',
+  'runecraft/dimension-shift',
+  'runecraft/grimoire-sorcerer',
   'runecraft/lamplit-training-of-a-witch-to-be',
   'runecraft/lucky-star-in-the-sky',
   'runecraft/make-some-noise',
+  'runecraft/melvie-princess-witch',
+  'runecraft/mr-bertrand-magic-mentor',
+  'runecraft/mysterian-knowledge',
+  'runecraft/mysterian-missile',
+  'runecraft/mystic-absorption',
+  'runecraft/riven-earth',
+  'runecraft/scorching-blast',
+  'runecraft/story-of-a-lifetime',
   'runecraft/sweep-tosho',
+  'runecraft/truth-s-adjudication',
   'runecraft/vodka',
+  'runecraft/witchbolt',
+  'runecraft/yukishima-master-biographer',
   'dragoncraft/pious-flame-heavens-scorcher',
   'dragoncraft/special-week-the-brightest-star-in-japan',
   'abysscraft/7-more-centimeters',
@@ -193,4 +231,23 @@ export const SCRIPT_MODULES: readonly Record<string, unknown>[] = [
   m60,
   m61,
   m62,
+  m63,
+  m64,
+  m65,
+  m66,
+  m67,
+  m68,
+  m69,
+  m70,
+  m71,
+  m72,
+  m73,
+  m74,
+  m75,
+  m76,
+  m77,
+  m78,
+  m79,
+  m80,
+  m81,
 ];

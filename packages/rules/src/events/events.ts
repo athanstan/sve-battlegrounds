@@ -13,6 +13,7 @@ import type {
   Outcome,
   Phase,
   Placement,
+  PlayDiscount,
   Prompt,
   ResourceName,
   ShownStats,
@@ -204,9 +205,18 @@ export type EngineEvent =
       readonly amount: number;
       readonly until: Duration;
     }
+  /** Server-only: a "next card you play costs N less" offer was made. */
+  | { readonly type: 'playDiscountOffered'; readonly discount: PlayDiscount }
+  /** Server-only: the card it applied to was played (or the offer ran out). */
+  | { readonly type: 'playDiscountSpent'; readonly ids: readonly number[] }
   | { readonly type: 'extraTurnQueued'; readonly seat: Seat }
   | { readonly type: 'turnSkipped'; readonly seat: Seat }
-  | { readonly type: 'dieRolled'; readonly seat: Seat; readonly value: number; readonly sides: number }
+  | {
+      readonly type: 'dieRolled';
+      readonly seat: Seat;
+      readonly value: number;
+      readonly sides: number;
+    }
   | { readonly type: 'numberDeclared'; readonly seat: Seat; readonly value: number }
   | { readonly type: 'nameDeclared'; readonly seat: Seat; readonly value: string }
   | { readonly type: 'cantLoseChanged'; readonly seats: readonly Seat[] };

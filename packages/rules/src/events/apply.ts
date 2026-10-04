@@ -86,6 +86,7 @@ export function stateFromCreation(event: MatchCreated): MatchState {
     seats: [seatFromSetup(event.seats[0]), seatFromSetup(event.seats[1])],
     resolution: [],
     costDeltas: {},
+    playDiscounts: [],
     work: [],
     pending: [],
     delayed: [],
@@ -470,15 +471,20 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
           return kept.length > 0 ? [[id, kept] as const] : [];
         }),
       );
+      // A "this turn" offer lapses with the turn; the other durations never apply to offers.
+      const playDiscounts = both
+        ? state.playDiscounts.filter((offer) => offer.until !== event.until)
+        : state.playDiscounts;
       if (both) {
         return {
           ...state,
           cards,
           costDeltas,
+          playDiscounts,
           seats: [strip(state.seats[0]), strip(state.seats[1])],
         };
       }
-      return updateSeat({ ...state, cards, costDeltas }, event.seat, strip);
+      return updateSeat({ ...state, cards, costDeltas, playDiscounts }, event.seat, strip);
     }
 
     case 'cardPlayed':
@@ -702,6 +708,15 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
         },
       };
     }
+
+    case 'playDiscountOffered':
+      return { ...state, playDiscounts: [...state.playDiscounts, event.discount] };
+
+    case 'playDiscountSpent':
+      return {
+        ...state,
+        playDiscounts: state.playDiscounts.filter((entry) => !event.ids.includes(entry.id)),
+      };
 
     case 'instanceBuffed': {
       const inst = state.cards[event.card];

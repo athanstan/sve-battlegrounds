@@ -158,7 +158,9 @@ function matchesPattern(
   }
   switch (pattern.type) {
     case 'played':
-      return event.type === 'cardPlayed' && event.seat === controller;
+      if (event.type !== 'cardPlayed' || event.seat !== controller) return false;
+      if (pattern.filter && !matchesFilter(state, event.card, pattern.filter, source)) return false;
+      return true;
     case 'moved':
       return event.type === 'cardsMoved';
     case 'damaged':

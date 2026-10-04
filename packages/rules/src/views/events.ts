@@ -1,7 +1,15 @@
 import type { EngineEvent, DrawCause, MoveCause } from '../events/events';
-import { assertNever, type CardId, type CardRef, type Seat } from '../model/ids';
-import type { FieldCard, Prompt, ShownStats, TimingPoint, TurnFlags } from '../state/state';
+import { assertNever, SEATS, type CardId, type CardRef, type Seat } from '../model/ids';
+import type {
+  Duration,
+  FieldCard,
+  Prompt,
+  ShownStats,
+  TimingPoint,
+  TurnFlags,
+} from '../state/state';
 import type { MatchState } from '../state/state';
+import { instanceShown } from '../state/shown';
 import { isPublicZone, type ZoneRef } from '../state/zones-model';
 import { cardRef, summarize } from './project';
 import type { CountedZone, PromptSummary } from './view';
@@ -26,7 +34,6 @@ const PUBLIC_EVENT_TYPES = [
   'wardsEngaged',
   'drewFromEmptyDeck',
   'leaderDefenseChanged',
-  'durationsEnded',
   'cardPlayed',
   'tokenEliminated',
   'followerEvolved',
@@ -108,6 +115,8 @@ export type ClientEvent =
       readonly enteredTurn?: number;
       readonly linkedTo?: CardId;
       readonly superEvolved?: boolean;
+      /** Live stats when the destination is EX (aligned with `cards`). */
+      readonly shown?: readonly ShownStats[];
     }
   | { readonly type: 'cardsRevealed'; readonly seat: Seat; readonly cards: readonly CardRef[] }
   | {
@@ -126,6 +135,19 @@ export type ClientEvent =
       readonly cards: readonly CardRef[];
       readonly zone: 'field' | 'ex' | 'resolution';
       readonly enteredTurn?: number;
+      /** Live stats when the tokens land in EX (aligned with `cards`). */
+      readonly shown?: readonly ShownStats[];
+    }
+  | {
+      readonly type: 'instanceBuffed';
+      readonly card: CardId;
+      readonly shown: ShownStats;
+    }
+  | {
+      readonly type: 'durationsEnded';
+      readonly seat: Seat;
+      readonly until: Exclude<Duration, null>;
+      readonly ex: readonly { readonly card: CardId; readonly shown: ShownStats }[];
     };
 
 export type ClientEventType = ClientEvent['type'];
@@ -167,7 +189,8 @@ export function projectEvent(
     case 'abilityDropped':
     case 'delayedQueued':
     case 'delayedConsumed':
-    case 'instanceBuffed':
+    case 'playDiscountOffered':
+    case 'playDiscountSpent':
       return null;
 
     case 'matchCreated': {
@@ -220,11 +243,16 @@ export function projectEvent(
       const visible =
         canSeeZone(viewer, event.from, event.faceDown) ||
         canSeeZone(viewer, event.to, event.faceDown);
+      const cards = visible ? refs(after, event.cards) : null;
+      const shown =
+        event.to.zone === 'ex' && cards
+          ? cards.map((card) => instanceShown(after, card.id))
+          : undefined;
       return {
         type: 'cardsMoved' as const,
         owner: event.owner,
         count: event.cards.length,
-        cards: visible ? refs(after, event.cards) : null,
+        cards,
         from: event.from,
         to: event.to,
         cause: event.cause,
@@ -233,6 +261,7 @@ export function projectEvent(
         ...(event.enteredTurn !== undefined ? { enteredTurn: event.enteredTurn } : {}),
         ...(event.linkedTo !== undefined ? { linkedTo: event.linkedTo } : {}),
         ...(event.superEvolved !== undefined ? { superEvolved: event.superEvolved } : {}),
+        ...(shown ? { shown } : {}),
       };
     }
 
@@ -258,6 +287,28 @@ export function projectEvent(
         cards: event.cards,
         zone: event.zone,
         ...(event.enteredTurn !== undefined ? { enteredTurn: event.enteredTurn } : {}),
+        ...(event.zone === 'ex'
+          ? { shown: event.cards.map((card) => instanceShown(after, card.id)) }
+          : {}),
+      };
+
+    case 'instanceBuffed': {
+      if (!after.seats.some((seat) => seat.ex.includes(event.card))) return null;
+      return {
+        type: 'instanceBuffed' as const,
+        card: event.card,
+        shown: instanceShown(after, event.card),
+      };
+    }
+
+    case 'durationsEnded':
+      return {
+        type: 'durationsEnded' as const,
+        seat: event.seat,
+        until: event.until,
+        ex: SEATS.flatMap((seat) =>
+          after.seats[seat].ex.map((id) => ({ card: id, shown: instanceShown(after, id) })),
+        ),
       };
 
     default:

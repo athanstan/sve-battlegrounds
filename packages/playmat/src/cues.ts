@@ -44,6 +44,7 @@ export function cuesFor(event: ClientEvent): readonly Cue[] {
     case 'cardPlayed':
     case 'tokenCreated':
     case 'tokenEliminated':
+    case 'instanceBuffed':
     case 'followerEvolved':
     case 'followerRaced':
     case 'damageDealt':

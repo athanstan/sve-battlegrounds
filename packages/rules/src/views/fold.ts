@@ -1,9 +1,9 @@
 import { assertNever, type CardId, type CardRef, type Seat } from '../model/ids';
 import { STARTING_LIMITS } from '../model/limits';
-import { ZERO_RESOURCES, type Placement } from '../state/state';
+import { ZERO_RESOURCES, type Placement, type ShownStats } from '../state/state';
 import type { ZoneRef } from '../state/zones-model';
 import type { ClientEvent, SeatIntro } from './events';
-import type { FieldCardView, MatchView, SeatView } from './view';
+import type { ExCardView, FieldCardView, MatchView, SeatView } from './view';
 import { canSeeHand, type Viewer } from './viewer';
 
 /**
@@ -80,7 +80,7 @@ function takeViewCards(
     case 'field':
       return { ...seat, field: seat.field.filter((entry) => !ids.includes(entry.card.id)) };
     case 'ex':
-      return { ...seat, ex: seat.ex.filter((card) => !ids.includes(card.id)) };
+      return { ...seat, ex: seat.ex.filter((entry) => !ids.includes(entry.card.id)) };
     case 'cemetery':
       return { ...seat, cemetery: seat.cemetery.filter((card) => !ids.includes(card.id)) };
     case 'banished':
@@ -128,6 +128,7 @@ function putViewCards(
     readonly enteredTurn?: number;
     readonly linkedTo?: CardId;
     readonly superEvolved?: boolean;
+    readonly shown?: readonly ShownStats[];
   },
 ): SeatView {
   if (to.zone === 'resolution' || to.seat !== seat.seat) return seat;
@@ -160,7 +161,16 @@ function putViewCards(
         ],
       };
     case 'ex':
-      return { ...seat, ex: [...seat.ex, ...refs] };
+      return {
+        ...seat,
+        ex: [
+          ...seat.ex,
+          ...refs.map((card, index): ExCardView => ({
+            card,
+            shown: extra.shown?.[index] ?? EMPTY_SHOWN,
+          })),
+        ],
+      };
     case 'cemetery':
       return { ...seat, cemetery: [...seat.cemetery, ...refs] };
     case 'banished':
@@ -255,7 +265,6 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
     case 'mulliganDecided':
     case 'drewFromEmptyDeck':
     case 'timingReached':
-    case 'durationsEnded':
     case 'cardPlayed':
     case 'cardsRevealed':
     case 'attackDeclared':
@@ -443,7 +452,18 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
         };
       }
       return updateSeatView(view, event.seat, (seat) => {
-        if (event.zone === 'ex') return { ...seat, ex: [...seat.ex, ...event.cards] };
+        if (event.zone === 'ex') {
+          return {
+            ...seat,
+            ex: [
+              ...seat.ex,
+              ...event.cards.map((card, index): ExCardView => ({
+                card,
+                shown: event.shown?.[index] ?? EMPTY_SHOWN,
+              })),
+            ],
+          };
+        }
         return {
           ...seat,
           field: [
@@ -471,16 +491,46 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
       };
     }
 
+    case 'instanceBuffed':
+      return {
+        ...view,
+        seats: [
+          patchExShown(view.seats[0], event.card, event.shown),
+          patchExShown(view.seats[1], event.card, event.shown),
+        ],
+      };
+
+    case 'durationsEnded': {
+      if (event.ex.length === 0) return view;
+      const byId = new Map(event.ex.map((entry) => [entry.card, entry.shown]));
+      const apply = (seat: SeatView): SeatView => ({
+        ...seat,
+        ex: seat.ex.map((entry) => {
+          const shown = byId.get(entry.card.id);
+          return shown ? { ...entry, shown } : entry;
+        }),
+      });
+      return { ...view, seats: [apply(view.seats[0]), apply(view.seats[1])] };
+    }
+
     default:
       return assertNever(event, 'Unhandled client event');
   }
+}
+
+function patchExShown(seat: SeatView, card: CardId, shown: ShownStats): SeatView {
+  if (!seat.ex.some((entry) => entry.card.id === card)) return seat;
+  return {
+    ...seat,
+    ex: seat.ex.map((entry) => (entry.card.id === card ? { ...entry, shown } : entry)),
+  };
 }
 
 function stripTokens(seat: SeatView, gone: ReadonlySet<CardId>): SeatView {
   return {
     ...seat,
     field: seat.field.filter((entry) => !gone.has(entry.card.id)),
-    ex: seat.ex.filter((card) => !gone.has(card.id)),
+    ex: seat.ex.filter((entry) => !gone.has(entry.card.id)),
     hand: {
       count: seat.hand.cards
         ? seat.hand.cards.filter((card) => !gone.has(card.id)).length

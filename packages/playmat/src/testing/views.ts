@@ -206,8 +206,14 @@ export function populate(view: MatchView): MatchView {
       ...seat,
       field,
       ex: [
-        ref(`lab:${seat.seat}:x0`, 'fx-torch-bearer'),
-        ref(`lab:${seat.seat}:x1`, 'fx-stray-hound'),
+        {
+          card: ref(`lab:${seat.seat}:x0`, 'fx-torch-bearer'),
+          shown: { attack: 1, defense: 1, keywords: [] as const },
+        },
+        {
+          card: ref(`lab:${seat.seat}:x1`, 'fx-stray-hound'),
+          shown: { attack: 1, defense: 1, keywords: [] as const },
+        },
       ],
       cemetery: [
         ref(`lab:${seat.seat}:c0`, 'fx-banner-bearer'),

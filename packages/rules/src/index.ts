@@ -108,6 +108,7 @@ export type {
   CountedZone,
   EvolveDeckView,
   EvolveLinkView,
+  ExCardView,
   FieldCardView,
   MatchView,
   PromptSummary,

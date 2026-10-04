@@ -175,6 +175,16 @@ describe('tokens (Appendix A)', () => {
       cost: 2,
     });
   });
+
+  it('includes Mysterian Missile', () => {
+    expect(DEFAULT_TOKENS['Mysterian Missile']).toMatchObject({
+      kind: 'spell',
+      cardClass: 'runecraft',
+      cost: 2,
+      traits: ['Mage', 'Academic'],
+      special: 'token',
+    });
+  });
 });
 
 describe('ability timing (CR 7.4.1, 10.7)', () => {

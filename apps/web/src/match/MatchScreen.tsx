@@ -248,7 +248,9 @@ function LiveMatch({ session }: { session: MatchSession }) {
 
   const inspectedDef = inspected ? catalog(inspected.ref.def) : undefined;
   const inspectedShown = inspected
-    ? view.seats.flatMap((s) => s.field).find((entry) => entry.card.id === inspected.ref.id)?.shown
+    ? (view.seats.flatMap((s) => s.field).find((entry) => entry.card.id === inspected.ref.id)
+        ?.shown ??
+      view.seats.flatMap((s) => s.ex).find((entry) => entry.card.id === inspected.ref.id)?.shown)
     : undefined;
 
   const nameplate = (which: Seat, anchor: { x: number; y: number }) => (

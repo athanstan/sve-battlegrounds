@@ -1,5 +1,6 @@
 import type { Condition, ResourceQuery, Value } from './spec';
 import { definitionOf, effectiveDefinition, type MatchState } from '../state/state';
+import { instanceShown } from '../state/shown';
 import { opponentOf, type CardId, type Seat } from '../model/ids';
 import { asCardIds, gather, matchesFilter } from './filters';
 
@@ -20,7 +21,12 @@ function attrOf(
     const field = state.seats[seat].field.find((card) => card.id === id);
     if (field) return attr === 'attack' ? field.shown.attack : field.shown.defense;
   }
-  const known = state.cards[id]?.lastKnown;
+  const card = state.cards[id];
+  if ((card?.modifiers?.length ?? 0) > 0) {
+    const shown = instanceShown(state, id);
+    return attr === 'attack' ? shown.attack : shown.defense;
+  }
+  const known = card?.lastKnown;
   if (known) return attr === 'attack' ? known.attack : known.defense;
   return attr === 'attack' ? (def.attack ?? 0) : (def.defense ?? 0);
 }

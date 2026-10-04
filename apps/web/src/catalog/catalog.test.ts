@@ -17,7 +17,7 @@ describe('definitionsIn', () => {
     for (const seat of view.seats) {
       expect(ids).toContain(seat.leader.card.def);
       for (const entry of seat.field) expect(ids).toContain(entry.card.def);
-      for (const card of seat.ex) expect(ids).toContain(card.def);
+      for (const entry of seat.ex) expect(ids).toContain(entry.card.def);
       for (const card of seat.cemetery) expect(ids).toContain(card.def);
     }
     for (const card of view.seats[0].hand.cards ?? []) expect(ids).toContain(card.def);

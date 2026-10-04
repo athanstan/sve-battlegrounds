@@ -1,5 +1,5 @@
 /**
- * Writes the card ids and counts of decks 940, 909 and 956 to packages/cards/fixtures/decks.json.
+ * Writes the card ids and counts of decks 940, 909, 956 and 920 to packages/cards/fixtures/decks.json.
  * Uses the read-only shadowrates connection and never prints the connection string.
  *
  *   pnpm dump:decks
@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createReadOnlyPool } from '@sve/shadowshowdown/postgres';
 
-const DECK_IDS = ['940', '909', '956'] as const;
+const DECK_IDS = ['940', '909', '956', '920'] as const;
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'packages/cards/fixtures/decks.json');
 

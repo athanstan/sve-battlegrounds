@@ -5,6 +5,7 @@ import {
   isBoxed,
   type FieldCard,
   type MatchState,
+  type PlayDiscount,
   type ShownStats,
 } from '../state/state';
 import type { Replacement, Restriction, StaticAbility } from './spec';
@@ -151,6 +152,15 @@ export function wouldBeReplaced(
   return false;
 }
 
+/** The "next card you play costs N less" offers that currently apply to this card. */
+export function playDiscountsFor(state: MatchState, card: CardId): readonly PlayDiscount[] {
+  const owner = state.cards[card]?.owner;
+  if (owner === undefined) return [];
+  return state.playDiscounts.filter(
+    (offer) => offer.seat === owner && matchesFilter(state, card, offer.filter, offer.source),
+  );
+}
+
 export function staticPlayCost(state: MatchState, card: CardId): number {
   const def = definitionOf(state, card);
   let cost = def.cost;
@@ -183,6 +193,7 @@ export function staticPlayCost(state: MatchState, card: CardId): number {
   }
   const thisTurn = state.costDeltas[card] ?? [];
   cost += thisTurn.reduce((sum, entry) => sum + entry.amount, 0);
+  cost += playDiscountsFor(state, card).reduce((sum, offer) => sum + offer.amount, 0);
   return Math.max(0, cost);
 }
 

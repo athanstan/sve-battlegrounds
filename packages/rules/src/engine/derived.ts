@@ -1,4 +1,10 @@
-import { definitionOf, isBoxed, type FieldCard, type MatchState, type ShownStats } from '../state/state';
+import {
+  definitionOf,
+  isBoxed,
+  type FieldCard,
+  type MatchState,
+  type ShownStats,
+} from '../state/state';
 import { SEATS, type CardId, type Seat } from '../model/ids';
 import type { Keyword } from '../model/cards';
 import { updateSeat } from '../state/zones';

@@ -1,7 +1,7 @@
 import type { CardDefinition, CardKind, Keyword } from '../model/cards';
 import type { CardDefId, CardId, CardRef, Seat } from '../model/ids';
 import type { RngState } from '../rng';
-import type { Ability, CardScript, Instr } from '../abilities/spec';
+import type { Ability, CardFilter, CardScript, Instr } from '../abilities/spec';
 import type { WorkFrame } from './work';
 import type { ZoneRef } from './zones-model';
 
@@ -48,6 +48,23 @@ export interface GrantedKeyword {
 
 export interface CostDelta {
   readonly amount: number;
+  readonly until: Duration;
+}
+
+/**
+ * "The next card you play costs N less." A standing offer on a player, not on a card: it
+ * discounts whichever matching card that player plays next and is spent when that card is played,
+ * so a card still in the deck can become playable the moment the offer is made.
+ */
+export interface PlayDiscount {
+  readonly id: number;
+  readonly seat: Seat;
+  readonly source: CardId;
+  /** Which cards it applies to; every card when absent. */
+  readonly filter?: CardFilter;
+  /** Added to the cost, so a discount is negative. */
+  readonly amount: number;
+  /** `endOfTurn` for "this turn"; `null` lasts until it is used. */
   readonly until: Duration;
 }
 
@@ -378,6 +395,8 @@ export interface MatchState {
   readonly resolution: readonly ResolutionEntry[];
   /** This-turn cost changes that live on cards in hand or EX (4.8.3.3). */
   readonly costDeltas: Readonly<Record<CardId, readonly CostDelta[]>>;
+  /** Player-level "next card you play costs N less" offers, oldest first. */
+  readonly playDiscounts: readonly PlayDiscount[];
 
   readonly work: readonly WorkFrame[];
   readonly pending: readonly PendingAbility[];

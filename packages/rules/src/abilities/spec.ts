@@ -127,6 +127,15 @@ export type Condition =
 
 export type CountSpec = number | { readonly upTo: number } | 'any';
 
+/** One group taken from a look-at-the-top pile. */
+export interface LookPick {
+  readonly filter?: CardFilter;
+  readonly upTo?: number;
+  readonly n?: number;
+  readonly reveal: boolean;
+  readonly then: 'hand';
+}
+
 export type Instr =
   | {
       readonly op: 'select';
@@ -147,13 +156,14 @@ export type Instr =
   | {
       readonly op: 'lookTop';
       readonly n: number;
-      readonly pick: {
-        readonly filter?: CardFilter;
-        readonly upTo: number;
-        readonly reveal: boolean;
-        readonly then: 'hand';
-      };
-      readonly rest: 'bottom' | 'top';
+      /**
+       * One group of cards to take from the looked-at pile. `picks` is several groups in order
+       * ("up to 1 Mage follower and up to 1 Mage spell"). `n` takes that many (doing as much as
+       * possible); `upTo` is optional.
+       */
+      readonly pick?: LookPick;
+      readonly picks?: readonly LookPick[];
+      readonly rest: 'bottom' | 'top' | 'bury';
     }
   | { readonly op: 'draw'; readonly n: Value; readonly who?: Who }
   | { readonly op: 'buryTop'; readonly n: Value; readonly who?: Who; readonly as?: string }
@@ -305,6 +315,17 @@ export type Instr =
   | { readonly op: 'superEvolve' }
   | { readonly op: 'ungrant'; readonly cards: string; readonly keywords: readonly Keyword[] }
   | { readonly op: 'reveal'; readonly cards: string }
+  /**
+   * "The next card you play costs N less." `amount` is added to the cost, so a discount is
+   * negative. It is spent by the first matching card played; `thisTurn` also lets it lapse at the
+   * end of the turn. Cards it makes affordable show as playable as soon as it is offered.
+   */
+  | {
+      readonly op: 'nextPlayCost';
+      readonly amount: number;
+      readonly filter?: CardFilter;
+      readonly thisTurn?: true;
+    }
   | {
       readonly op: 'forEach';
       readonly cards: string;
@@ -328,6 +349,12 @@ export type Cost =
   | { readonly engage: true }
   | { readonly burySelf: true }
   | { readonly discard: { readonly n: number; readonly filter?: CardFilter } }
+  /**
+   * Show cards from your hand. They stay in hand; the opponent sees them. Played cards pick them
+   * while paying (so only matching cards can be picked), and the card cannot be played without
+   * enough of them.
+   */
+  | { readonly reveal: { readonly n: number; readonly filter?: CardFilter } }
   | { readonly list: readonly Cost[] }
   | { readonly banish: { readonly n: number; readonly filter?: CardFilter; readonly from?: Place } }
   | { readonly bury: { readonly n: number; readonly filter?: CardFilter; readonly from?: Place } }
@@ -463,13 +490,21 @@ export interface SpellAbility {
   readonly kind: 'spell';
   readonly key: string;
   readonly effect: readonly Instr[];
-  /** Optional extra cost paid while playing (10.6.2.2). Discarded ids land in `__extraDiscarded`. */
+  /**
+   * Optional extra cost paid while playing (10.6.2.2). Discarded or banished ids land in
+   * `__extraDiscarded`. Paying it reduces the play-point cost by `reduceBy`.
+   */
   readonly extraCost?: {
     readonly label: string;
-    readonly discard: { readonly n: number; readonly filter?: CardFilter };
+    readonly discard?: { readonly n: number; readonly filter?: CardFilter };
+    readonly banish?: { readonly n: number; readonly filter?: CardFilter; readonly from: Place };
     readonly reduceBy: number;
   };
-  /** Extra payment on top of play points (10.6.2.2). */
+  /**
+   * "As an additional cost to play this card…" (10.6.2.2). Compulsory: the card is not offered
+   * unless it can be paid, and cards to reveal or discard are picked while playing it. Play
+   * points, Leader defense and the like are paid with the play points.
+   */
   readonly additionalCost?: Cost;
   /** Paid instead of the printed play-point cost. */
   readonly alternateCost?: Cost;

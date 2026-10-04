@@ -12,8 +12,15 @@ import { parseServeCost } from '../abilities/generic';
 import { evolvePlayCost, hasRestriction, playRestricted } from '../abilities/statics';
 import { evaluateCondition } from '../abilities/values';
 import type { Instr, SpellAbility } from '../abilities/spec';
-import { costBuriesSelf, costEngages, costPlayPoints, canPayCost } from '../abilities/costs';
-import { gather, matchesFilter } from '../abilities/filters';
+import {
+  additionalCostOf,
+  canPayCost,
+  canPayExtraCost,
+  costBuriesSelf,
+  costEngages,
+  costPlayPoints,
+} from '../abilities/costs';
+import { gather } from '../abilities/filters';
 import { locate } from '../state/zones';
 import { correspondingCarrot, correspondingEvolve } from './evolve';
 
@@ -58,18 +65,6 @@ function extraCostOf(state: MatchState, card: CardId): SpellAbility['extraCost']
   return spell?.kind === 'spell' ? spell.extraCost : undefined;
 }
 
-function canPayExtraCost(
-  state: MatchState,
-  seat: Seat,
-  card: CardId,
-  extra: NonNullable<SpellAbility['extraCost']>,
-): boolean {
-  const matching = state.seats[seat].hand.filter(
-    (id) => id !== card && matchesFilter(state, id, extra.discard.filter, card),
-  );
-  return matching.length >= extra.discard.n;
-}
-
 export function legalPlayOptions(state: MatchState, seat: Seat): readonly MainOption[] {
   const options: MainOption[] = [];
   const { playPoints } = state.seats[seat].resources;
@@ -88,14 +83,18 @@ export function legalPlayOptions(state: MatchState, seat: Seat): readonly MainOp
     const extra = extraCostOf(state, id);
     const reduced =
       extra && canPayExtraCost(state, seat, id, extra) ? Math.max(0, full - extra.reduceBy) : full;
-    if (reduced > playPoints) continue;
+    // 10.6.2.2: a card whose additional cost cannot be paid is not offered at all.
+    const additional = additionalCostOf(state, id);
+    if (additional && !canPayCost(state, seat, id, additional)) continue;
+    const addPoints = additional ? costPlayPoints(additional) : 0;
+    if (reduced + addPoints > playPoints) continue;
     if (playRestricted(state, seat, id)) continue;
     if ((def.kind === 'follower' || def.kind === 'amulet') && fieldFull) continue;
     if (!requiredTargetsAvailable(state, seat, id)) continue;
     options.push({
       type: 'play',
       card: id,
-      cost: full <= playPoints ? full : reduced,
+      cost: (full + addPoints <= playPoints ? full : reduced) + addPoints,
       from,
     });
   }

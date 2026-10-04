@@ -14,7 +14,16 @@ export interface PlayCardFrame {
   readonly card: CardId;
   readonly from: 'hand' | 'ex';
   readonly stage:
-    'specify' | 'modes' | 'extraCost' | 'targets' | 'allocate' | 'pay' | 'check' | 'resolve' | 'done';
+    | 'specify'
+    | 'modes'
+    | 'additionalCost'
+    | 'extraCost'
+    | 'targets'
+    | 'allocate'
+    | 'pay'
+    | 'check'
+    | 'resolve'
+    | 'done';
   readonly abilityKey: string | null;
   readonly vars: Readonly<Record<string, unknown>>;
   readonly chosenModes: readonly number[];
