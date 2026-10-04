@@ -1,4 +1,4 @@
-import { definitionOf, type FieldCard, type MatchState, type ShownStats } from '../state/state';
+import { definitionOf, isBoxed, type FieldCard, type MatchState, type ShownStats } from '../state/state';
 import { SEATS, type CardId, type Seat } from '../model/ids';
 import type { Keyword } from '../model/cards';
 import { updateSeat } from '../state/zones';
@@ -29,7 +29,7 @@ export function computeShown(state: MatchState, card: FieldCard, seat: Seat): Sh
   return {
     attack: withStatics.attack,
     defense: withStatics.defense - card.damageTaken,
-    keywords: [...unique],
+    keywords: isBoxed(card, state.turn) ? [] : [...unique],
   };
 }
 
@@ -66,8 +66,8 @@ export function fieldOf(state: MatchState, id: CardId): { seat: Seat; card: Fiel
 export function hasShownKeyword(state: MatchState, id: CardId, keyword: Keyword): boolean {
   const found = fieldOf(state, id);
   if (found) return found.card.shown.keywords.includes(keyword);
-  const def = definitionOf(state, id);
-  return def.keywords.includes(keyword);
+  if (!state.cards[id]) return false;
+  return definitionOf(state, id).keywords.includes(keyword);
 }
 
 export function patchField(

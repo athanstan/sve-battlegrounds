@@ -1,5 +1,6 @@
 import {
   asCardDefId,
+  cardKey,
   type CardClass,
   type CardDefId,
   type CardDefinition,
@@ -69,6 +70,7 @@ function follower(row: Row, cardClass: CardClass): CardDefinition {
   const [name, cost, attack, defense, ...keywords] = row;
   return {
     id: asCardDefId(`fx-${slug(name)}`),
+    key: cardKey(name),
     name,
     kind: 'follower',
     special: null,
@@ -89,6 +91,7 @@ function evolved(base: CardDefinition): CardDefinition {
   return {
     ...base,
     id: asCardDefId(`${base.id}-evolved`),
+    key: cardKey(base.name, 'evolved'),
     special: 'evolved',
     cost: 0,
     attack: (base.attack ?? 0) + 2,
@@ -99,6 +102,7 @@ function evolved(base: CardDefinition): CardDefinition {
 function leader(cardClass: CardClass, name: string): CardDefinition {
   return {
     id: asCardDefId(`fx-leader-${cardClass}`),
+    key: cardKey(name),
     name,
     kind: 'leader',
     special: null,

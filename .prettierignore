@@ -4,3 +4,5 @@ coverage
 pnpm-lock.yaml
 docs/SVEE-Comprehensive-Rules.pdf
 docs/style
+packages/cards/fixtures/cards.json
+packages/cards/src/scripts.generated.ts

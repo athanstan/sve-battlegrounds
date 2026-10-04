@@ -1,10 +1,10 @@
-import type { CardCatalog, CardClass, CardDefId, Keyword } from '@sve/rules';
+import type { CardCatalog, CardDefId, Keyword } from '@sve/rules';
 import { Container, Graphics, Sprite, Text, type Texture } from 'pixi.js';
 import type { Camera } from '../camera';
 import type { CardTextures } from '../draw/cards';
 import { ORB_SIZE, type HudTextures } from '../draw/hud';
 import type { AvatarSlot, CardSlot, OrbTraySlot, PileSlot, Zone } from '../layout';
-import { CARD, COLOR, DESIGN, FONTS } from '../theme';
+import { CARD, COLOR, DESIGN, FONTS, LEADER_CARD } from '../theme';
 import { QuadMesh, cornersOf, insideQuad, type Corners } from './quad';
 
 /**
@@ -294,8 +294,12 @@ export class CardActor extends Container {
         .map((keyword) => KEY_MARK[keyword])
         .filter(Boolean)
         .join(' ');
-      this.#keys.text = marks;
-      this.#keys.visible = marks.length > 0;
+      const counters = Object.entries(slot.counters)
+        .filter(([, n]) => n > 0)
+        .map(([name, n]) => `${name.slice(0, 1).toUpperCase()}${n}`)
+        .join(' ');
+      this.#keys.text = [marks, counters].filter((part) => part.length > 0).join(' ');
+      this.#keys.visible = this.#keys.text.length > 0;
       this.#keys.position.set(x, y - HALF.height * scale * 0.82);
     } else {
       this.#keys.visible = false;
@@ -425,15 +429,15 @@ const DEFENSE_STYLE = {
   stroke: { color: COLOR.ink, width: 3 },
 } as const;
 
-/** A leader's portrait, their defense on a shield, and a ring for whose turn it is. */
+/** A leader card on the rail, its defense on a shield, and a ring for whose turn it is. */
 export class AvatarActor extends Container {
   slot: AvatarSlot;
   readonly #art: Art;
   readonly #ring: Sprite;
-  readonly #portrait: Sprite;
+  readonly #glow: Sprite;
+  readonly #face: Sprite;
   readonly #shield: Sprite;
   readonly #defense: Text;
-  #cardClass: CardClass | null = null;
   /** Animated by cues; both settle at rest (0 and 1). */
   readonly state = { ring: 0, pop: 1 };
 
@@ -441,13 +445,22 @@ export class AvatarActor extends Container {
     super();
     this.slot = slot;
     this.#art = art;
-    this.#ring = new Sprite({ texture: art.hud.ring, anchor: 0.5, alpha: 0 });
-    this.#portrait = new Sprite({ anchor: 0.5 });
+    this.#ring = new Sprite({ texture: art.hud.leaderHalo, anchor: 0.5, alpha: 0 });
+    this.#glow = new Sprite({ texture: art.hud.glow(COLOR.legal), anchor: 0.5, visible: false });
+    this.#face = new Sprite({ anchor: 0.5 });
     this.#shield = new Sprite({ texture: art.hud.shield, anchor: 0.5 });
     this.#defense = new Text({ text: '', resolution: 2, style: DEFENSE_STYLE, anchor: 0.5 });
     this.#defense.y = -2;
     this.#shield.addChild(this.#defense);
-    this.addChild(this.#ring, this.#portrait, this.#shield);
+    this.addChild(this.#ring, this.#glow, this.#face, this.#shield);
+    const scale = LEADER_CARD.width / CARD.width;
+    this.#glow.scale.set(scale);
+    this.eventMode = 'static';
+    this.cursor = 'default';
+    this.hitArea = {
+      contains: (x: number, y: number) =>
+        Math.abs(x) <= LEADER_CARD.width / 2 && Math.abs(y) <= LEADER_CARD.height / 2,
+    };
     this.update(slot);
   }
 
@@ -456,12 +469,16 @@ export class AvatarActor extends Container {
     this.position.set(slot.position.x, slot.position.y);
     this.#shield.position.set(slot.shield.x - slot.position.x, slot.shield.y - slot.position.y);
     this.#defense.text = String(slot.defense);
+    this.#face.texture = this.#art.textures.face(slot.leader.def, this.#art.onFaceChange);
+    // Art files are full card scans at their own pixel size; pin the sprite to the rail card.
+    this.#face.width = LEADER_CARD.width;
+    this.#face.height = LEADER_CARD.height;
+  }
 
-    const cardClass = this.#art.catalog()(slot.leader.def)?.cardClass ?? 'neutral';
-    if (cardClass !== this.#cardClass) {
-      this.#cardClass = cardClass;
-      this.#portrait.texture = this.#art.hud.portrait(cardClass);
-    }
+  setTargeted(targeted: boolean): void {
+    this.#glow.visible = targeted;
+    this.cursor = targeted ? 'pointer' : 'default';
+    if (targeted) this.state.ring = 1;
   }
 
   /** The ring: bright on your turn, breathing while the match waits on you. */
@@ -469,7 +486,7 @@ export class AvatarActor extends Container {
     const { active, waiting } = this.slot;
     const resting = waiting ? 0.5 + 0.35 * Math.sin(time / 380) : active ? 0.85 : 0;
     this.#ring.alpha = Math.max(resting, this.state.ring);
-    this.#ring.scale.set(1 + this.state.ring * 0.18);
+    this.#ring.scale.set(1 + this.state.ring * 0.08);
     this.#shield.scale.set(this.state.pop);
   }
 }

@@ -1,7 +1,7 @@
-import type { CardDefinition, Keyword } from '../model/cards';
+import type { CardDefinition, CardKind, Keyword } from '../model/cards';
 import type { CardDefId, CardId, CardRef, Seat } from '../model/ids';
 import type { RngState } from '../rng';
-import type { CardScript, Instr } from '../abilities/spec';
+import type { Ability, CardScript, Instr } from '../abilities/spec';
 import type { WorkFrame } from './work';
 import type { ZoneRef } from './zones-model';
 
@@ -19,6 +19,20 @@ export interface CardInstance {
   readonly def: CardDefId;
   readonly owner: Seat;
   readonly token: boolean;
+  /** Survives zone changes until the turn ends (Cheval Grand). */
+  readonly damagedThisTurnBy?: readonly CardId[];
+  readonly modifiers?: readonly Modifier[];
+  readonly granted?: readonly GrantedKeyword[];
+  /** Snapshot taken when this card last left a zone (10.7.4, 10.11). */
+  readonly lastKnown?: LastKnownInfo;
+}
+
+export interface LastKnownInfo {
+  readonly zone: string;
+  readonly seat?: Seat;
+  readonly attack: number;
+  readonly defense: number;
+  readonly keywords: readonly Keyword[];
 }
 
 export interface Modifier {
@@ -59,6 +73,25 @@ export interface FieldCard {
   readonly shown: ShownStats;
   /** Times this follower has raced this turn (14.2.3). */
   readonly racedTimes: number;
+  /** Last turn number this follower stays Boxed (loses abilities, does not refresh). */
+  readonly boxedUntilTurn?: number;
+  /** Named counters on this card (15.1). */
+  readonly counters: Readonly<Record<string, number>>;
+  /** Equipment stacked beneath this follower. */
+  readonly equipped: readonly CardId[];
+  /** Skip refresh through this turn number. */
+  readonly skipRefreshUntilTurn?: number;
+  /** Temporary type while Maneuver is in effect. */
+  readonly maneuvered?: true;
+  /** Printed type override (follower into amulet, and so on). */
+  readonly kindOverride?: CardKind;
+  /** Abilities granted to this card (quoted text, 10.9 ability-granting layer). */
+  readonly grantedAbilities: readonly GrantedAbility[];
+}
+
+export interface GrantedAbility {
+  readonly ability: Ability;
+  readonly until: Duration;
 }
 
 export const fieldCard = (
@@ -76,7 +109,14 @@ export const fieldCard = (
   damagedThisTurnBy: [],
   shown,
   racedTimes: 0,
+  counters: {},
+  equipped: [],
+  grantedAbilities: [],
 });
+
+export function isBoxed(card: Pick<FieldCard, 'boxedUntilTurn'>, turn: number): boolean {
+  return (card.boxedUntilTurn ?? -1) >= turn;
+}
 
 /** A card in the evolve zone linked to a field card (4.12, 5.16). */
 export interface EvolveLink {
@@ -131,6 +171,12 @@ export interface TurnFlags {
   readonly mainPhaseStarted: boolean;
   /** How many times each ability key became pending this turn (10.7.2.2). */
   readonly pendingCounts: Readonly<Record<string, number>>;
+  readonly playedThisTurn: readonly CardId[];
+  readonly leaderLostDefense: number;
+  readonly followersAttacked: number;
+  readonly ubExecuted: number;
+  readonly chosenModes: readonly string[];
+  readonly fusedThisTurn: number;
 }
 
 export const ZERO_TURN_FLAGS: TurnFlags = {
@@ -139,6 +185,12 @@ export const ZERO_TURN_FLAGS: TurnFlags = {
   evolvedThisTurn: false,
   mainPhaseStarted: false,
   pendingCounts: {},
+  playedThisTurn: [],
+  leaderLostDefense: 0,
+  followersAttacked: 0,
+  ubExecuted: 0,
+  chosenModes: [],
+  fusedThisTurn: 0,
 };
 
 export interface ZoneLimits {
@@ -264,6 +316,19 @@ export type Prompt =
       readonly kind: 'keepOnField' | 'keepInEx';
       readonly keep: number;
       readonly candidates: readonly CardId[];
+    })
+  | (PromptBase & {
+      readonly kind: 'chooseNumber';
+      readonly label: string;
+      readonly min: number;
+      readonly max: number;
+    })
+  | (PromptBase & { readonly kind: 'declareName'; readonly label: string })
+  | (PromptBase & {
+      readonly kind: 'orderCards';
+      readonly label: string;
+      readonly candidates: readonly CardId[];
+      readonly previews: readonly CardRef[];
     });
 
 export type PromptKind = Prompt['kind'];
@@ -284,6 +349,7 @@ export interface PendingAbility {
   readonly sourceDef: CardDefId;
   readonly abilityKey: string;
   readonly triggerSeq: number;
+  readonly vars?: Readonly<Record<string, unknown>>;
 }
 
 export interface DelayedTrigger {
@@ -316,6 +382,15 @@ export interface MatchState {
   readonly work: readonly WorkFrame[];
   readonly pending: readonly PendingAbility[];
   readonly delayed: readonly DelayedTrigger[];
+  /** Extra turns queued by effects (5.26). Consumed when selecting the next active player. */
+  readonly extraTurns: number;
+  /** Remaining skipped turns per seat (5.28). */
+  readonly skipTurns: readonly [number, number];
+  /** Seats that currently cannot lose (Ancient Protector). */
+  readonly cantLose: readonly Seat[];
+  readonly nextContinuousId: number;
+  /** Event types applied this turn, oldest first. Used by R3/R4 tallies. */
+  readonly eventLog: readonly string[];
 
   /** Seat who goes first; null until chosen (6.2.1.6). */
   readonly first: Seat | null;
@@ -360,11 +435,18 @@ export function refOf(state: MatchState, card: CardId): CardRef {
 export function effectiveDefinition(state: MatchState, card: CardId): CardDefinition {
   const printed = definitionOf(state, card);
   const owner = state.cards[card]?.owner;
-  if (owner === undefined) return printed;
-  const link = state.seats[owner].evolveZone.find((entry) => entry.linkedTo === card);
-  if (!link) return printed;
-  const evolved = definitionOf(state, link.card);
-  return { ...evolved, cost: printed.cost };
+  let info = printed;
+  if (owner !== undefined) {
+    const link = state.seats[owner].evolveZone.find((entry) => entry.linkedTo === card);
+    if (link) info = { ...definitionOf(state, link.card), cost: printed.cost };
+  }
+  for (const seat of [0, 1] as const) {
+    const field = state.seats[seat].field.find((entry) => entry.id === card);
+    if (!field) continue;
+    if (field.kindOverride) return { ...info, kind: field.kindOverride };
+    if (field.maneuvered) return { ...info, kind: 'follower' };
+  }
+  return info;
 }
 
 export type { ZoneRef };

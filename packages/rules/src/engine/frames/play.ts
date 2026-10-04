@@ -10,8 +10,9 @@ import { hasShownKeyword, refreshDerived } from '../derived';
 import { pushResolveAbility } from './ability';
 import { isSelection } from '../queries';
 import { refOf } from '../../state/state';
-import type { Instr } from '../../abilities/spec';
-import { gather } from '../../abilities/filters';
+import type { Instr, SpellAbility } from '../../abilities/spec';
+import { gather, matchesFilter } from '../../abilities/filters';
+import { discard } from '../verbs';
 
 function playEffect(t: Transcript, card: PlayCardFrame['card']): readonly Instr[] {
   const def = definitionOf(t.state, card);
@@ -30,6 +31,24 @@ function playEffect(t: Transcript, card: PlayCardFrame['card']): readonly Instr[
 function chooseOne(effect: readonly Instr[]): Extract<Instr, { op: 'chooseOne' }> | undefined {
   return effect.find(
     (instr): instr is Extract<Instr, { op: 'chooseOne' }> => instr.op === 'chooseOne',
+  );
+}
+
+function extraCostOf(t: Transcript, card: PlayCardFrame['card']): SpellAbility['extraCost'] | undefined {
+  const def = definitionOf(t.state, card);
+  if (def.kind !== 'spell') return undefined;
+  const script = t.state.scripts[def.id];
+  const spell = script?.abilities.find((ability) => ability.kind === 'spell');
+  return spell?.kind === 'spell' ? spell.extraCost : undefined;
+}
+
+function extraCandidates(
+  t: Transcript,
+  frame: PlayCardFrame,
+  extra: NonNullable<SpellAbility['extraCost']>,
+) {
+  return t.state.seats[frame.seat].hand.filter((id) =>
+    matchesFilter(t.state, id, extra.discard.filter, frame.card),
   );
 }
 
@@ -70,9 +89,47 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
             })),
           };
         }
-        current = { ...current, stage: 'targets' };
+        current = { ...current, stage: 'extraCost' };
         updateWork(t, current);
         continue;
+      }
+      case 'extraCost': {
+        const extra = extraCostOf(t, current.card);
+        if (!extra || current.vars.__extraCostDone === true) {
+          current = { ...current, stage: 'targets' };
+          updateWork(t, current);
+          continue;
+        }
+        const candidates = extraCandidates(t, current, extra);
+        if (current.vars.__extraPicking === true) {
+          return {
+            kind: 'selectCards',
+            seat: current.seat,
+            label: extra.label,
+            candidates,
+            previews: candidates.map((id) => refOf(t.state, id)),
+            min: extra.discard.n,
+            max: extra.discard.n,
+            where: 'mat',
+          };
+        }
+        const full = playCost(t.state, current.card);
+        const mustPay = full > t.state.seats[current.seat].resources.playPoints;
+        if (mustPay) {
+          if (candidates.length < extra.discard.n) {
+            current = { ...current, vars: { ...current.vars, __extraCostDone: true } };
+            updateWork(t, current);
+            continue;
+          }
+          current = { ...current, vars: { ...current.vars, __extraPicking: true } };
+          updateWork(t, current);
+          continue;
+        }
+        return {
+          kind: 'confirmOptional',
+          seat: current.seat,
+          label: extra.label,
+        };
       }
       case 'targets': {
         const selects = targetSelects(playEffect(t, current.card));
@@ -118,7 +175,10 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
         updateWork(t, current);
         continue;
       case 'pay': {
-        payPlayPoints(t, current.seat, playCost(t.state, current.card));
+        const extra = extraCostOf(t, current.card);
+        const full = playCost(t.state, current.card);
+        const paid = current.vars.__extraPaid === true && extra ? extra.reduceBy : 0;
+        payPlayPoints(t, current.seat, Math.max(0, full - paid));
         t.emit({
           type: 'cardPlayed',
           seat: current.seat,
@@ -264,6 +324,38 @@ export function answerPlayCard(
     );
     if (!pending) return REJECTED;
     updateWork(t, { ...frame, vars: { ...frame.vars, [pending.as]: intent.choice.cards } });
+    return { accepted: true, followUp: null };
+  }
+  if (frame.stage === 'extraCost') {
+    const extra = extraCostOf(t, frame.card);
+    if (!extra) return REJECTED;
+    if (
+      prompt.kind === 'confirmOptional' &&
+      intent.type === 'choose' &&
+      intent.choice.kind === 'confirm'
+    ) {
+      if (!intent.choice.yes) {
+        updateWork(t, { ...frame, vars: { ...frame.vars, __extraCostDone: true } });
+        return { accepted: true, followUp: null };
+      }
+      updateWork(t, { ...frame, vars: { ...frame.vars, __extraPicking: true } });
+      return { accepted: true, followUp: null };
+    }
+    if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
+    if (prompt.kind !== 'selectCards') return REJECTED;
+    if (!isSelection(intent.choice.cards, prompt.candidates)) return REJECTED;
+    if (intent.choice.cards.length !== extra.discard.n) return REJECTED;
+    discard(t, frame.seat, intent.choice.cards);
+    updateWork(t, {
+      ...frame,
+      vars: {
+        ...frame.vars,
+        __extraPaid: true,
+        __extraCostDone: true,
+        __extraPicking: false,
+        __extraDiscarded: intent.choice.cards,
+      },
+    });
     return { accepted: true, followUp: null };
   }
   if (

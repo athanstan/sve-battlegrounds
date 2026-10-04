@@ -113,6 +113,33 @@ const answer = (prompt: Prompt) => {
           choice: { kind: 'orderPending', id: prompt.pending[0]?.id ?? 0 },
         },
       } as const;
+    case 'chooseNumber':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'number', value: prompt.min },
+        },
+      } as const;
+    case 'declareName':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'name', value: '' },
+        },
+      } as const;
+    case 'orderCards':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'order', cards: prompt.candidates },
+        },
+      } as const;
   }
 };
 
@@ -171,6 +198,8 @@ export function populate(view: MatchView): MatchView {
       enteredTurn: 1,
       shown: { attack: 2, defense: 2, keywords: [] as const },
       racedTimes: 0,
+      counters: {},
+      equipped: [],
     }));
     const evolved = field[2];
     return {

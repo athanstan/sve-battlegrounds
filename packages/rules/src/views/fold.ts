@@ -154,6 +154,8 @@ function putViewCards(
             enteredTurn: extra.enteredTurn ?? 0,
             shown: EMPTY_SHOWN,
             racedTimes: 0,
+            counters: {},
+            equipped: [],
           })),
         ],
       };
@@ -265,6 +267,12 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
     case 'followerEvolved':
     case 'followerRaced':
     case 'carrotsTurned':
+    case 'dieRolled':
+    case 'numberDeclared':
+    case 'nameDeclared':
+    case 'extraTurnQueued':
+    case 'turnSkipped':
+    case 'cantLoseChanged':
       return view;
 
     case 'damageDealt':
@@ -387,6 +395,8 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
                 shown: event.shown,
                 placement: event.placement,
                 racedTimes: event.racedTimes,
+                counters: event.counters,
+                equipped: event.equipped,
               }
             : entry,
         ),
@@ -444,6 +454,8 @@ export function foldView(view: MatchView | null, event: ClientEvent): MatchView 
               enteredTurn: event.enteredTurn ?? 0,
               shown: EMPTY_SHOWN,
               racedTimes: 0,
+              counters: {},
+              equipped: [],
             })),
           ],
         };

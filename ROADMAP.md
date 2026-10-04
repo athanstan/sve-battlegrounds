@@ -6,33 +6,50 @@ boxes are done; the rest is open.
 
 ## Now: make the two reference decks real
 
-The pinned fixtures for decks 940 (_On Curve All Day_, Forestcraft) and 909 (_daiwa vodka 2026_,
-Umamusume) in `packages/cards` were built by hand, not dumped from the database. Playing against the
-live decks shows where they drift.
+The playable decks in `packages/cards/fixtures/decks.json` (printing ids and counts only; every
+card fact lives in the deck-independent `cards.json` catalog) are decks **909** (_On Curve All Day_,
+Forestcraft, leader Arisa), **940** (_daiwa vodka 2026_, Umamusume, leader Special Week), and
+**956** (_Wasteland Sword_, Swordcraft, leader Aurelia, Blooming Blade). Scripts
+are keyed by `CardDefinition.key` (slug + `@evolved`/`@token` + `#a`/`#b` for double-faced faces).
+Printed names stay as they are: a corresponding evolve card is still the one that shares a name
+(5.16.1.1.1). Double-faced a/b faces stay two separate cards; there is no face picking yet.
 
-- [ ] **Run `pnpm dump:decks` against the shadowrates database** and replace the hand-built fixture
-      with the real card list and printed text. The live 940 contains cards the fixture does not
-      (for example _Blessed Fairy Dancer_), and the live 909 is 43 + 10 cards where the fixture is
-      40 + 10.
-- [ ] **Script every card in both live decks.** `coverage.test.ts` already fails for any card whose
-      name and text hash has no script, so the test list is the to-do list.
-- [ ] Add a per-card test for each new script (`behaviors.test.ts` is the pattern).
-- [ ] Make the "text not automated" badge disappear for exactly the cards that have a matching
-      script, and nothing else. Verify it in a real match for both decks.
+- [x] **Run `pnpm dump:decks` against the shadowrates database** and replace the hand-built fixture
+      with the real card list and printed text.
+- [x] **Script every card in the live decks.** `coverage.test.ts` fails for any unique key whose
+      printed-text hash has no matching script.
+- [x] Add a per-card test for each new script (`behaviors.test.ts` is the pattern).
+- [x] Make the "text not automated" badge disappear for exactly the cards that have a matching
+      script, and nothing else.
+
+- [x] **Deck-independent card catalog** (`pnpm dump:cards` -> `fixtures/cards.json`), scripts filed
+      as `<craft>/<card>.ts`, scaffolded by `pnpm new:card`, indexed by `pnpm gen:scripts`.
+- [x] Leaders are keyed `name@leader`, so a leader never shares a key with the follower it is drawn from.
+- [ ] Script the rest of the catalog (`pnpm cards:status`), craft by craft.
+- [ ] Review the 87 cards whose reprints are worded differently beyond markup (they stay unscripted
+      for that printing until a script says `allPrintings: true`).
+- [x] Model Advanced, Equipment and Crest printings (Evolution Point cards stay physical-only).
 
 ## Rules gaps and known approximations
 
+- [x] **Stable card key** for scripts and logs, next to the printed name.
+- [x] Double-faced faces keyed `#a` / `#b` and treated as two cards.
+- [x] `copyLimit` from `deck_restriction`, with script overrides for the 10-copy evolved Carrot spells.
+- [x] `alsoNamed` for evolve correspondence (Carrot and "this follower's name is also …").
+- [x] Play-time optional extra cost (Pious Flame).
+- [x] Opponent `buryTop`, same-base-cost, look-top rest on top, choose-one option costs, self to EX.
+- [x] Conditional statics (`activeIf`) and granted Strike (Air Shakur).
+- [x] _Cheval Grand_: last-known `damagedThisTurnBy` lives on the card instance across zone changes.
+- [x] "Whenever a Pixie token is put onto your field" buffs only the token that entered.
+- [x] **Boxed** (Nahtnaught): lose abilities, skip refresh, expire at the end of the controller's next turn.
+- [x] Reserved-only static grants, evolve-cost statics, mixed leader/follower targeting, `chooseUpTo`.
 - [ ] **Quick windows** list only cards that carry the Quick keyword. Anything else that can be
       used at Quick timing is not offered yet.
 - [ ] The Quick window opens only when the non-active player has something to play. That leaks a
       little information (standard in digital card games), but it should be a deliberate, documented
       choice with a per-match setting.
-- [ ] _Cheval Grand_: "an enemy follower damaged by you leaves the field" cannot read
-      `damagedThisTurnBy` after the zone change, so it never fires.
-- [ ] _Titania_ buffs every Pixie token on the field, not only the one that entered.
 - [ ] "Put the rest on the bottom in any order" keeps the current order and asks nothing.
-- [ ] Printings the catalog does not model yet: **equipment, crests, evolution-point cards and
-      Advanced followers**. Decks that use them are listed as illegal.
+- [x] Printings the catalog models: equipment, crests, Advanced followers. Evolution-point cards stay physical-only.
 - [ ] Other universes (Vanguard) are rejected until their setup rules exist.
 - [ ] Tokens in the main deck are rejected; check that this matches the rules for every universe.
 - [ ] Walk the Comprehensive Rules once more for sections the slice does not touch, and list what is
@@ -42,6 +59,7 @@ live decks shows where they drift.
 ## Table and interface
 
 - [x] Hover a card to read its full text in a scrollable, closable panel.
+- [x] Leader is the printed leader card on the left rail (art when it loads), not a class silhouette.
 - [ ] Open the card text panel from piles (cemetery, banished, evolve deck) and from the card browser.
 - [ ] **Touch and keyboard**: long-press to inspect, a way to focus cards without a mouse, and
       screen-reader names for cards and prompts.
@@ -66,6 +84,14 @@ live decks shows where they drift.
 - [ ] Rate limits and size limits on chat and intents.
 - [ ] Switch from the shadowrates database to the real shadowshowdown.com API when it ships (only
       `contract.ts` and `http.ts` should change), and move to a dedicated read-only database role.
+- [ ] **Sync with shadowshowdown.com.** Two independent seams, deliberately not tied together:
+  - _Cards_ are public and shared: `pnpm dump:cards` reads a `CatalogSource` (Postgres today).
+    The same rows from `GET /api/v1/cards?game=sve` become a second source; the committed
+    `cards.json` stays the offline cache scripts are written against.
+  - _Decks_ belong to a player: Google sign-in on the Colyseus server (`@colyseus/auth`), the
+    shadowshowdown account linked to it, and `gateway.listDecks(token)` (already
+    `GET /api/v1/decks`) returning the player's decks. `fixtures/decks.json` then only feeds
+    tests and the sparring partner. No script or rule reads a deck.
 - [ ] Make the fixture gateway and database gateway a single, explicit configuration choice instead
       of environment guessing.
 

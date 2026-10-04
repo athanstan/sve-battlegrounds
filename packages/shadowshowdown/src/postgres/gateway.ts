@@ -212,7 +212,7 @@ export function createPostgresGateway(options: PostgresGatewayOptions): Postgres
       load: async () => {
         const rows = await query<CardRow>(
           `select c.id, c.name, c.original_card_id, cr.name as craft, c.main_type, c.sub_type, c.cost,
-                  c.atk, c.health, c.traits, c.abilities, c.effects, c.image
+                  c.atk, c.health, c.traits, c.abilities, c.effects, c.image, c.deck_restriction
              from cards c join crafts cr on cr.id = c.craft_id`,
         );
         return rows.flatMap((row) => toCardDefinition(row, mapping) ?? []);
@@ -222,7 +222,7 @@ export function createPostgresGateway(options: PostgresGatewayOptions): Postgres
     async tokens() {
       const rows = await query<CardRow>(
         `select c.id, c.name, c.original_card_id, cr.name as craft, c.main_type, c.sub_type, c.cost,
-                c.atk, c.health, c.traits, c.abilities, c.effects, c.image
+                c.atk, c.health, c.traits, c.abilities, c.effects, c.image, c.deck_restriction
            from cards c join crafts cr on cr.id = c.craft_id
           where c.sub_type = 'Token'
           order by c.name, (c.image is null), c.id::bigint`,

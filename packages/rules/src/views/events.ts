@@ -42,6 +42,12 @@ const PUBLIC_EVENT_TYPES = [
   'gameEnded',
   'costDeltaApplied',
   'carrotsTurned',
+  'dieRolled',
+  'numberDeclared',
+  'nameDeclared',
+  'extraTurnQueued',
+  'turnSkipped',
+  'cantLoseChanged',
 ] as const;
 
 type PublicEventType = (typeof PUBLIC_EVENT_TYPES)[number];
@@ -111,6 +117,8 @@ export type ClientEvent =
       readonly shown: ShownStats;
       readonly placement: FieldCard['placement'];
       readonly racedTimes: number;
+      readonly counters: Readonly<Record<string, number>>;
+      readonly equipped: readonly CardRef[];
     }
   | {
       readonly type: 'tokenCreated';
@@ -159,6 +167,7 @@ export function projectEvent(
     case 'abilityDropped':
     case 'delayedQueued':
     case 'delayedConsumed':
+    case 'instanceBuffed':
       return null;
 
     case 'matchCreated': {
@@ -238,6 +247,8 @@ export function projectEvent(
         shown: event.field.shown,
         placement: event.field.placement,
         racedTimes: event.field.racedTimes,
+        counters: event.field.counters,
+        equipped: refs(after, event.field.equipped),
       };
 
     case 'tokenCreated':

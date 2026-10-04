@@ -2,7 +2,7 @@ import type { Action, Intent } from '../actions/intents';
 import { createMatch, type CreatedMatch } from '../engine/create';
 import { reduce } from '../engine/reduce';
 import type { EngineEvent } from '../events/events';
-import type { CardCatalog, CardDefinition } from '../model/cards';
+import { cardKey, type CardCatalog, type CardDefinition } from '../model/cards';
 import type { DeckList } from '../model/deck';
 import { asCardDefId, type CardDefId, type Seat } from '../model/ids';
 import type { MatchState, Prompt } from '../state/state';
@@ -13,20 +13,24 @@ const FOLLOWER_COUNT = 14;
 
 const def = (
   partial: Partial<CardDefinition> & Pick<CardDefinition, 'id' | 'name'>,
-): CardDefinition => ({
-  kind: 'follower',
-  special: null,
-  cardClass: 'neutral',
-  universe: null,
-  traits: [],
-  cost: 1,
-  attack: 1,
-  defense: 1,
-  keywords: [],
-  text: '',
-  artUrl: null,
-  ...partial,
-});
+): CardDefinition => {
+  const special = partial.special ?? null;
+  return {
+    kind: 'follower',
+    special: null,
+    cardClass: 'neutral',
+    universe: null,
+    traits: [],
+    cost: 1,
+    attack: 1,
+    defense: 1,
+    keywords: [],
+    text: '',
+    artUrl: null,
+    ...partial,
+    key: partial.key ?? cardKey(partial.name, special),
+  };
+};
 
 const followerId = (n: number): CardDefId => asCardDefId(`test-follower-${n}`);
 const evolvedId = (n: number): CardDefId => asCardDefId(`test-evolved-${n}`);
@@ -198,6 +202,33 @@ export function defaultAnswer(prompt: Prompt): Action {
           type: 'choose',
           promptId: prompt.id,
           choice: { kind: 'orderPending', id: prompt.pending[0]?.id ?? 0 },
+        },
+      };
+    case 'chooseNumber':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'number', value: prompt.min },
+        },
+      };
+    case 'declareName':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'name', value: '' },
+        },
+      };
+    case 'orderCards':
+      return {
+        ...base,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'order', cards: prompt.candidates },
         },
       };
   }

@@ -79,6 +79,13 @@ export function cuesFor(event: ClientEvent): readonly Cue[] {
       return [{ kind: 'gameOver' }];
     case 'cardsRevealed':
       return [{ kind: 'reveal', seat: event.seat, cards: event.cards }];
+    case 'dieRolled':
+    case 'numberDeclared':
+    case 'nameDeclared':
+    case 'extraTurnQueued':
+    case 'turnSkipped':
+    case 'cantLoseChanged':
+      return NONE;
 
     default:
       return assertNever(event, 'Unhandled client event');

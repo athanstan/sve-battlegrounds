@@ -28,7 +28,7 @@ const restrict = (...entries) => ({
 });
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/.vite/**', '**/coverage/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', '**/.vite/**', '**/coverage/**', '**/.agents/**'] },
 
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

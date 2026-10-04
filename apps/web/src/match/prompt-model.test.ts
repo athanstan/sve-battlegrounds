@@ -118,6 +118,41 @@ describe('promptUi', () => {
     expect([0, 1, 2].map((n) => asked.confirmLabel(n))).toEqual(['Skip', 'Engage 1', 'Engage 2']);
     expect(asked.intent([])).toEqual({ type: 'engageWards', promptId: 7, cards: [] });
   });
+
+  it('turns a number prompt into a numeric bar', () => {
+    const base = viewOf(atMainPhase('prompts', 2), 0);
+    const asked = promptUi(
+      withPrompt(base, {
+        kind: 'chooseNumber',
+        id: 21,
+        seat: 0,
+        label: 'Choose X',
+        min: 0,
+        max: 5,
+      }),
+    );
+    expect(asked?.kind).toBe('number');
+    if (asked?.kind !== 'number') return;
+    expect(asked.intent(3)).toEqual({
+      type: 'choose',
+      promptId: 21,
+      choice: { kind: 'number', value: 3 },
+    });
+  });
+
+  it('turns a name prompt into a text bar', () => {
+    const base = viewOf(atMainPhase('prompts', 2), 0);
+    const asked = promptUi(
+      withPrompt(base, { kind: 'declareName', id: 22, seat: 0, label: 'Declare a card name' }),
+    );
+    expect(asked?.kind).toBe('text');
+    if (asked?.kind !== 'text') return;
+    expect(asked.intent('Fairy')).toEqual({
+      type: 'choose',
+      promptId: 22,
+      choice: { kind: 'name', value: 'Fairy' },
+    });
+  });
 });
 
 describe('waitingLabel', () => {

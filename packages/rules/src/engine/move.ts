@@ -7,7 +7,7 @@ import type { MoveCause } from '../state/zones-model';
 import { locate } from '../state/zones';
 import type { Transcript } from './transcript';
 import { fieldOf } from './derived';
-import { staticPlayCost } from '../abilities/statics';
+import { modifiedDamage, staticPlayCost } from '../abilities/statics';
 import { shuffle } from '../rng';
 
 export function moveCards(
@@ -27,20 +27,40 @@ export function moveCards(
   },
 ): void {
   if (args.cards.length === 0) return;
-  t.emit({
-    type: 'cardsMoved',
-    owner: args.owner,
-    cards: args.cards,
-    from: args.from,
-    to: args.to,
-    cause: args.cause,
-    ...(args.faceDown !== undefined ? { faceDown: args.faceDown } : {}),
-    ...(args.placement !== undefined ? { placement: args.placement } : {}),
-    ...(args.enteredTurn !== undefined ? { enteredTurn: args.enteredTurn } : {}),
-    ...(args.linkedTo !== undefined ? { linkedTo: args.linkedTo } : {}),
-    ...(args.superEvolved !== undefined ? { superEvolved: args.superEvolved } : {}),
-    ...(args.position !== undefined ? { position: args.position } : {}),
+  const valid = new Set(['field', 'ex', 'resolution', 'evolveDeck', 'evolveDeckRevealed']);
+  const redirected = args.cards.filter((id) => {
+    const def = t.state.defs[t.state.cards[id]?.def ?? ('' as never)];
+    return def?.special === 'advanced' && !valid.has(args.to.zone);
   });
+  const rest = args.cards.filter((id) => !redirected.includes(id));
+  if (rest.length > 0) {
+    t.emit({
+      type: 'cardsMoved',
+      owner: args.owner,
+      cards: rest,
+      from: args.from,
+      to: args.to,
+      cause: args.cause,
+      ...(args.faceDown !== undefined ? { faceDown: args.faceDown } : {}),
+      ...(args.placement !== undefined ? { placement: args.placement } : {}),
+      ...(args.enteredTurn !== undefined ? { enteredTurn: args.enteredTurn } : {}),
+      ...(args.linkedTo !== undefined ? { linkedTo: args.linkedTo } : {}),
+      ...(args.superEvolved !== undefined ? { superEvolved: args.superEvolved } : {}),
+      ...(args.position !== undefined ? { position: args.position } : {}),
+    });
+  }
+  // 9.2.2: Advanced cards leaving the field/EX/resolution go to the evolve deck faceup.
+  for (const id of redirected) {
+    const owner = t.state.cards[id]?.owner ?? args.owner;
+    t.emit({
+      type: 'cardsMoved',
+      owner,
+      cards: [id],
+      from: args.from,
+      to: { zone: 'evolveDeckRevealed', seat: owner },
+      cause: args.cause,
+    });
+  }
 }
 
 export function zoneOf(state: MatchState, id: CardId): ZoneRef {
@@ -146,12 +166,14 @@ export function dealDamage(
   },
 ): void {
   if (args.amount <= 0) return; // 1.3.2.2: 0 damage is not dealt
+  const amount = modifiedDamage(t.state, args);
+  if (amount <= 0) return;
   t.emit({
     type: 'damageDealt',
     source: args.source,
     target: args.target,
     targetSeat: args.targetSeat,
-    amount: args.amount,
+    amount,
     combat: args.combat,
   });
 }

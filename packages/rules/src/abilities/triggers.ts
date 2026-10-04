@@ -3,13 +3,16 @@ import { opponentOf, type CardId, type Seat } from '../model/ids';
 import {
   definitionOf,
   effectiveDefinition,
+  isBoxed,
   type MatchState,
   type PendingAbility,
 } from '../state/state';
 import type { Trigger, TriggeredAbility } from './spec';
 import { matchesFilter } from './filters';
+import { evaluateCondition } from './values';
 import type { Transcript } from '../engine/transcript';
 import { locate } from '../state/zones';
+import { fieldOf } from '../engine/derived';
 
 function abilitiesOn(
   state: MatchState,
@@ -112,18 +115,85 @@ function matchesTrigger(
         if (event.from.seat !== enemy) return false;
         return event.cards.some((id) => {
           if (!matchesFilter(state, id, on.enemyDamagedByYouLeavesField, source)) return false;
-          const field = state.seats[enemy].field.find((card) => card.id === id);
-          // Last-known: the card has already left; look at damagedThisTurnBy on remaining...
-          // The event applied first, so the field card is gone. We cannot read damagedThisTurnBy.
-          // Scan uses last-known from the event itself: skip if we cannot prove it.
-          void field;
-          return true;
+          const sources = state.cards[id]?.damagedThisTurnBy ?? [];
+          return sources.some((dealer) => {
+            if (state.cards[dealer]?.owner !== controller) return false;
+            if (!on.fromSource) return true;
+            return matchesFilter(state, dealer, on.fromSource, source);
+          });
         });
       }
       return false;
     }
-    default:
+    case 'instanceBuffed': {
+      if (typeof on !== 'object' || !('gainsAttackOrDefense' in on)) return false;
+      if (event.card !== source) return false;
+      const attack = event.modifier?.attack ?? 0;
+      const defense = event.modifier?.defense ?? 0;
+      return attack !== 0 || defense !== 0;
+    }
+    default: {
+      if (typeof on === 'object' && 'whenever' in on) {
+        return matchesPattern(state, event, controller, source, on.whenever);
+      }
       return false;
+    }
+  }
+}
+
+function matchesPattern(
+  state: MatchState,
+  event: EngineEvent,
+  controller: Seat,
+  source: CardId,
+  pattern: Extract<Trigger, { whenever: unknown }>['whenever'],
+): boolean {
+  if (pattern.self) {
+    const involved =
+      ('card' in event && event.card === source) ||
+      ('cards' in event && Array.isArray(event.cards) && event.cards.includes(source)) ||
+      ('fieldCard' in event && event.fieldCard === source) ||
+      ('attacker' in event && event.attacker === source);
+    if (!involved) return false;
+  }
+  switch (pattern.type) {
+    case 'played':
+      return event.type === 'cardPlayed' && event.seat === controller;
+    case 'moved':
+      return event.type === 'cardsMoved';
+    case 'damaged':
+      return event.type === 'damageDealt';
+    case 'destroyed':
+      return event.type === 'cardsMoved' && event.cause === 'destroy';
+    case 'evolved':
+      return event.type === 'followerEvolved' && event.seat === controller;
+    case 'attacked':
+      return event.type === 'attackDeclared' && event.seat === controller;
+    case 'engaged':
+      return event.type === 'wardsEngaged' && event.cards.includes(source);
+    case 'statGained':
+      return event.type === 'instanceBuffed' && event.card === source;
+    case 'ubExecuted':
+      return event.type === 'abilityResolved' && state.seats[controller].flags.ubExecuted > 0;
+    case 'drive':
+      return event.type === 'attackEnded';
+    case 'fused':
+      return event.type === 'flagsChanged' && event.flags.fusedThisTurn > 0;
+    case 'leaderDefense':
+      return event.type === 'leaderDefenseChanged' && event.seat === controller;
+    case 'drew':
+      return event.type === 'cardsDrawn' && event.seat === controller;
+    case 'timing':
+      return (
+        event.type === 'timingReached' &&
+        (pattern.at === undefined || event.point === pattern.at) &&
+        (pattern.whose === 'each' ||
+          (pattern.whose === 'yours' && event.seat === controller) ||
+          (pattern.whose === 'opponents' && event.seat !== controller) ||
+          pattern.whose === undefined)
+      );
+    case 'state':
+      return event.type === 'leaderDefenseChanged' && event.defense <= 0;
   }
 }
 
@@ -160,6 +230,31 @@ function occurrenceCount(
   return matchesTrigger(state, event, controller, source, on) ? 1 : 0;
 }
 
+function enteredCards(
+  state: MatchState,
+  event: EngineEvent,
+  controller: Seat,
+  source: CardId,
+  on: Trigger,
+): CardId[] {
+  if (typeof on !== 'object' || !('tokenEntersYourField' in on)) return [];
+  if (event.type === 'tokenCreated') {
+    if (event.seat !== controller || event.zone !== 'field') return [];
+    return event.cards
+      .map((ref) => ref.id)
+      .filter((id) => matchesFilter(state, id, on.tokenEntersYourField, source));
+  }
+  if (event.type === 'cardsMoved') {
+    if (event.to.zone !== 'field' || event.to.seat !== controller) return [];
+    return event.cards.filter(
+      (id) =>
+        Boolean(state.cards[id]?.token) &&
+        matchesFilter(state, id, on.tokenEntersYourField, source),
+    );
+  }
+  return [];
+}
+
 function enqueue(
   t: Transcript,
   seat: Seat,
@@ -168,6 +263,26 @@ function enqueue(
   ability: TriggeredAbility,
   event: EngineEvent,
 ): void {
+  if (ability.condition && !evaluateCondition(t.state, seat, ability.condition, {}, source)) {
+    return;
+  }
+  const entered = enteredCards(t.state, event, seat, source, ability.on);
+  if (entered.length > 0) {
+    for (const id of entered) {
+      if (capReached(t.state, seat, ability)) break;
+      t.emit({
+        type: 'abilityPending',
+        id: t.state.nextPendingId,
+        seat,
+        source,
+        sourceDef,
+        abilityKey: ability.key,
+        triggerSeq: t.state.seq,
+        vars: { entered: [id] },
+      });
+    }
+    return;
+  }
   const hits = occurrenceCount(t.state, event, seat, source, ability.on);
   for (let n = 0; n < hits; n++) {
     if (capReached(t.state, seat, ability)) break; // 10.7.2.2
@@ -230,6 +345,8 @@ export function scanTriggers(t: Transcript, event: EngineEvent): void {
     seen.add(key);
     const printed = t.state.cards[id]?.def;
     if (!printed) continue;
+    const loc = fieldOf(t.state, id);
+    if (loc && isBoxed(loc.card, t.state.turn)) continue;
     // Last-known effective definition at scan time (10.7.4.1, 10.11).
     const effective = effectiveDefinition(t.state, id);
     const sourceDef = effective.id;
@@ -244,6 +361,11 @@ export function scanTriggers(t: Transcript, event: EngineEvent): void {
       if (ability.on === 'fanfare') continue; // Fanfare is the play pipeline, not the pending pool.
       enqueue(t, seat, id, sourceDef, ability, event);
     }
+    const granted = loc?.card.grantedAbilities ?? [];
+    for (const grant of granted) {
+      if (grant.ability.kind !== 'triggered') continue;
+      enqueue(t, seat, id, sourceDef, grant.ability, event);
+    }
     // Also scan the printed (unevolved) script when it differs, so a base-side trigger still fires.
     if (printed !== sourceDef) {
       for (const ability of abilitiesOn(t.state, printed)) {
@@ -254,7 +376,31 @@ export function scanTriggers(t: Transcript, event: EngineEvent): void {
   }
 }
 
-/** State-trigger hook (10.7.6). No card in the two decks needs one; the scan lives here so they can. */
-export function scanStateTriggers(_t: Transcript): void {
-  // Intentionally empty: re-arming "when there are no cards in your hand" slots in here.
+/** State-trigger hook (10.7.6): leader defense 0 or less re-arms `whenever: { type: 'state' }`. */
+export function scanStateTriggers(t: Transcript): void {
+  for (const { id, seat } of fieldSources(t.state)) {
+    if (t.state.seats[seat].leader.defense > 0) continue;
+    const loc = fieldOf(t.state, id);
+    if (loc && isBoxed(loc.card, t.state.turn)) continue;
+    const printed = t.state.cards[id]?.def;
+    if (!printed) continue;
+    const sourceDef = effectiveDefinition(t.state, id).id;
+    const granted = (loc?.card.grantedAbilities ?? [])
+      .map((grant) => grant.ability)
+      .filter((ability): ability is TriggeredAbility => ability.kind === 'triggered');
+    for (const ability of [...abilitiesOn(t.state, sourceDef), ...granted]) {
+      if (typeof ability.on !== 'object' || !('whenever' in ability.on)) continue;
+      if (ability.on.whenever.type !== 'state') continue;
+      if (capReached(t.state, seat, ability)) continue;
+      t.emit({
+        type: 'abilityPending',
+        id: t.state.nextPendingId,
+        seat,
+        source: id,
+        sourceDef,
+        abilityKey: ability.key,
+        triggerSeq: t.state.seq,
+      });
+    }
+  }
 }

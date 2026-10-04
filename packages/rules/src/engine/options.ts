@@ -2,17 +2,20 @@ import { opponentOf, type CardId, type Seat } from '../model/ids';
 import {
   definitionOf,
   effectiveDefinition,
+  isBoxed,
   type MainOption,
   type MatchState,
 } from '../state/state';
 import { playCost } from './move';
 import { hasShownKeyword } from './derived';
-import { parseEvolveCost, parseServeCost } from '../abilities/generic';
-import { playRestricted } from '../abilities/statics';
+import { parseServeCost } from '../abilities/generic';
+import { evolvePlayCost, hasRestriction, playRestricted } from '../abilities/statics';
 import { evaluateCondition } from '../abilities/values';
-import type { Cost, Instr } from '../abilities/spec';
-import { gather } from '../abilities/filters';
+import type { Instr, SpellAbility } from '../abilities/spec';
+import { costBuriesSelf, costEngages, costPlayPoints, canPayCost } from '../abilities/costs';
+import { gather, matchesFilter } from '../abilities/filters';
 import { locate } from '../state/zones';
+import { correspondingCarrot, correspondingEvolve } from './evolve';
 
 const inHandOrEx = (state: MatchState, seat: Seat, id: CardId): 'hand' | 'ex' | null => {
   if (state.seats[seat].hand.includes(id)) return 'hand';
@@ -47,6 +50,26 @@ function requiredTargetsAvailable(state: MatchState, seat: Seat, card: CardId): 
   return true;
 }
 
+function extraCostOf(state: MatchState, card: CardId): SpellAbility['extraCost'] | undefined {
+  const def = definitionOf(state, card);
+  if (def.kind !== 'spell') return undefined;
+  const script = state.scripts[def.id];
+  const spell = script?.abilities.find((ability) => ability.kind === 'spell');
+  return spell?.kind === 'spell' ? spell.extraCost : undefined;
+}
+
+function canPayExtraCost(
+  state: MatchState,
+  seat: Seat,
+  card: CardId,
+  extra: NonNullable<SpellAbility['extraCost']>,
+): boolean {
+  const matching = state.seats[seat].hand.filter(
+    (id) => id !== card && matchesFilter(state, id, extra.discard.filter, card),
+  );
+  return matching.length >= extra.discard.n;
+}
+
 export function legalPlayOptions(state: MatchState, seat: Seat): readonly MainOption[] {
   const options: MainOption[] = [];
   const { playPoints } = state.seats[seat].resources;
@@ -61,26 +84,29 @@ export function legalPlayOptions(state: MatchState, seat: Seat): readonly MainOp
       (ability) => ability.kind === 'static' && ability.notFromEx,
     );
     if (from === 'ex' && notFromEx) continue;
-    const cost = playCost(state, id);
-    if (cost > playPoints) continue;
+    const full = playCost(state, id);
+    const extra = extraCostOf(state, id);
+    const reduced =
+      extra && canPayExtraCost(state, seat, id, extra) ? Math.max(0, full - extra.reduceBy) : full;
+    if (reduced > playPoints) continue;
     if (playRestricted(state, seat, id)) continue;
     if ((def.kind === 'follower' || def.kind === 'amulet') && fieldFull) continue;
     if (!requiredTargetsAvailable(state, seat, id)) continue;
-    options.push({ type: 'play', card: id, cost, from });
+    options.push({
+      type: 'play',
+      card: id,
+      cost: full <= playPoints ? full : reduced,
+      from,
+    });
   }
   return options;
-}
-
-function costPlayPoints(cost: Cost): number {
-  if ('playPoints' in cost) return cost.playPoints;
-  if ('list' in cost) return cost.list.reduce((sum, part) => sum + costPlayPoints(part), 0);
-  return 0;
 }
 
 export function legalActivateOptions(state: MatchState, seat: Seat): readonly MainOption[] {
   const options: MainOption[] = [];
   const { playPoints } = state.seats[seat].resources;
   for (const card of state.seats[seat].field) {
+    if (isBoxed(card, state.turn)) continue;
     const def = effectiveDefinition(state, card.id);
     const script = state.scripts[def.id] ?? state.scripts[definitionOf(state, card.id).id];
     if (!script) continue;
@@ -89,9 +115,17 @@ export function legalActivateOptions(state: MatchState, seat: Seat): readonly Ma
       if (ability.condition && !evaluateCondition(state, seat, ability.condition, {}, card.id)) {
         continue;
       }
+      if (
+        ability.perTurn !== undefined &&
+        (state.seats[seat].flags.pendingCounts[ability.key] ?? 0) >= ability.perTurn
+      ) {
+        continue;
+      }
       const cost = costPlayPoints(ability.cost);
+      if (!canPayCost(state, seat, card.id, ability.cost)) continue;
       if (cost > playPoints) continue;
-      if ('engage' in ability.cost && card.placement !== 'reserved') continue;
+      if (costEngages(ability.cost) && card.placement !== 'reserved') continue;
+      if (costBuriesSelf(ability.cost) && locate(state, card.id)?.zone !== 'field') continue;
       options.push({
         type: 'activate',
         card: card.id,
@@ -117,42 +151,50 @@ export function legalAttackOptions(state: MatchState, seat: Seat): readonly Main
   const enemy = opponentOf(seat);
   for (const attacker of state.seats[seat].field) {
     const def = effectiveDefinition(state, attacker.id);
-    if (def.kind !== 'follower') continue;
+    if (def.kind !== 'follower' && !attacker.maneuvered) continue;
     if (attacker.placement !== 'reserved') continue;
+    if (
+      hasRestriction(state, attacker.id, (r) => r.cantAttack === true || r.cantAttack === 'enemies')
+    ) {
+      continue;
+    }
     const storm = hasShownKeyword(state, attacker.id, 'storm');
     const rush = hasShownKeyword(state, attacker.id, 'rush');
     const assail = hasShownKeyword(state, attacker.id, 'assail');
     const remained = remainedSinceTurnStart(state, seat, attacker.id);
     if (!remained && !storm && !rush) continue;
+    const noLeaders = hasRestriction(state, attacker.id, (r) => r.cantAttack === 'leaders');
+    const noFollowers = hasRestriction(state, attacker.id, (r) => r.cantAttack === 'followers');
 
     const wards = state.seats[enemy].field.filter(
       (card) => card.placement === 'engaged' && hasShownKeyword(state, card.id, 'ward'),
     );
     const targets: (CardId | 'leader')[] = [];
     if (wards.length > 0) {
-      for (const ward of wards) targets.push(ward.id);
-    } else {
-      for (const foe of state.seats[enemy].field) {
-        const foeDef = effectiveDefinition(state, foe.id);
-        if (foeDef.kind !== 'follower') continue;
-        if (hasShownKeyword(state, foe.id, 'intimidate')) continue;
-        const engaged = foe.placement === 'engaged' || assail;
-        if (!engaged) continue;
-        if (!remained && rush && !storm && foe.placement !== 'engaged' && !assail) continue;
-        targets.push(foe.id);
+      for (const ward of wards) {
+        if (hasRestriction(state, ward.id, (r) => r.cantBeAttacked === true)) continue;
+        targets.push(ward.id);
       }
-      if (remained || storm) targets.push('leader');
+    } else {
+      if (!noFollowers) {
+        for (const foe of state.seats[enemy].field) {
+          const foeDef = effectiveDefinition(state, foe.id);
+          if (foeDef.kind !== 'follower' && !foe.maneuvered) continue;
+          if (hasShownKeyword(state, foe.id, 'intimidate')) continue;
+          if (hasRestriction(state, foe.id, (r) => r.cantBeAttacked === true)) continue;
+          const engaged = foe.placement === 'engaged' || assail;
+          if (!engaged) continue;
+          if (!remained && rush && !storm && foe.placement !== 'engaged' && !assail) continue;
+          targets.push(foe.id);
+        }
+      }
+      if ((remained || storm) && !noLeaders) targets.push('leader');
     }
     for (const target of targets) {
       options.push({ type: 'attack', attacker: attacker.id, target });
     }
   }
   return options;
-}
-
-function correspondingEvolve(state: MatchState, seat: Seat, fieldCard: CardId): CardId | undefined {
-  const name = effectiveDefinition(state, fieldCard).name;
-  return state.seats[seat].evolveDeck.find((id) => definitionOf(state, id).name === name);
 }
 
 export function legalEvolveOptions(state: MatchState, seat: Seat): readonly MainOption[] {
@@ -166,8 +208,7 @@ export function legalEvolveOptions(state: MatchState, seat: Seat): readonly Main
     ((seat === first && turnsPassed >= 7) || (seat !== first && turnsPassed >= 6));
 
   for (const card of state.seats[seat].field) {
-    const def = definitionOf(state, card.id);
-    const cost = parseEvolveCost(def.text);
+    const cost = evolvePlayCost(state, card.id);
     if (cost === null) continue;
     if (!correspondingEvolve(state, seat, card.id)) continue;
     const canPp = playPoints >= cost;
@@ -218,12 +259,7 @@ export function legalServeOptions(state: MatchState, seat: Seat): readonly MainO
   if (state.seats[seat].flags.evolvedThisTurn) return [];
   const options: MainOption[] = [];
   const { playPoints, evolutionPoints } = state.seats[seat].resources;
-  const carrots = state.seats[seat].evolveDeck.filter((id) => {
-    const def = definitionOf(state, id);
-    const script = state.scripts[def.id];
-    return (script?.alsoNamed?.includes('Carrot') ?? false) || def.name.includes('Carrot');
-  });
-  if (carrots.length === 0) return [];
+  if (!correspondingCarrot(state, seat)) return [];
   for (const card of state.seats[seat].field) {
     const def = definitionOf(state, card.id);
     const cost = parseServeCost(def.text);

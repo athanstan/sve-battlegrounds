@@ -74,14 +74,16 @@ describe('keeping a view in step', () => {
   });
 
   it('folds a whole match of event runs into exactly the view the server would have projected', () => {
-    // The first run is a match being created, which a late joiner receives as a snapshot instead.
     const [created, ...rest] = messages;
     if (!created) throw new Error('no messages');
+    // Opening events start at seq 0 and begin with matchCreated, so a client with no view yet
+    // can fold them. That is how the turn-order prompt lands without waiting on a snapshot.
     let sync = applyEvents(INITIAL_SYNC, { ...created, fromSeq: 0 });
-    // A client that has no view yet cannot apply anything: it must ask for one.
-    expect(sync.resync).toBe(true);
+    expect(sync.resync).toBe(false);
+    expect(sync.frame?.kind).toBe('snapshot');
+    expect(sync.state.view).toEqual(views[0]);
+    expect(sync.state.view?.waitingOn?.kind).toBe('turnOrder');
 
-    sync = applySnapshot({ seq: created.toSeq, view: views[0]! });
     let state = sync.state;
     for (const [index, message] of rest.entries()) {
       const step = applyEvents(state, message);

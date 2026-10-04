@@ -1,9 +1,16 @@
 import type { Keyword } from '../model/cards';
 import { SEATS, type CardId, type Seat } from '../model/ids';
-import { definitionOf, type FieldCard, type MatchState, type ShownStats } from '../state/state';
-import type { StaticAbility } from './spec';
-import { evaluateCondition } from './values';
+import {
+  definitionOf,
+  isBoxed,
+  type FieldCard,
+  type MatchState,
+  type ShownStats,
+} from '../state/state';
+import type { Replacement, Restriction, StaticAbility } from './spec';
+import { evaluateCondition, evaluateValue } from './values';
 import { matchesFilter } from './filters';
+import { parseEvolveCost } from './generic';
 
 export function staticsInZone(
   state: MatchState,
@@ -18,6 +25,10 @@ export function staticsInZone(
         : state.seats[seat].hand;
   const out: { source: CardId; ability: StaticAbility }[] = [];
   for (const id of ids) {
+    if (zone === 'field') {
+      const field = state.seats[seat].field.find((card) => card.id === id);
+      if (field && isBoxed(field, state.turn)) continue;
+    }
     const def = definitionOf(state, id);
     const script = state.scripts[def.id];
     if (!script) continue;
@@ -46,6 +57,19 @@ export function activeStatics(
   return out;
 }
 
+function staticLive(
+  state: MatchState,
+  entry: { readonly source: CardId; readonly seat: Seat; readonly ability: StaticAbility },
+): boolean {
+  if (
+    entry.ability.activeIf &&
+    !evaluateCondition(state, entry.seat, entry.ability.activeIf, {}, entry.source)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function applyStaticGrants(
   state: MatchState,
   card: FieldCard,
@@ -55,14 +79,20 @@ export function applyStaticGrants(
   const keywords = new Set<Keyword>(base.keywords);
   let attack = base.attack;
   let defense = base.defense;
+  // 10.9.1: ability/keyword grants (layer) apply before numeric modifications.
   for (const entry of activeStatics(state)) {
+    if (!staticLive(state, entry)) continue;
+    const grant = entry.ability.grant;
+    if (!grant?.keywords) continue;
+    if (!matchesFilter(state, card.id, grant.filter, entry.source)) continue;
+    void seat;
+    for (const keyword of grant.keywords) keywords.add(keyword);
+  }
+  for (const entry of activeStatics(state)) {
+    if (!staticLive(state, entry)) continue;
     const grant = entry.ability.grant;
     if (!grant) continue;
     if (!matchesFilter(state, card.id, grant.filter, entry.source)) continue;
-    // One-shot persistent effects only cover cards present when they resolved (10.9.2);
-    // static grants here are "while on the field" and apply to later arrivals (10.9.3.1).
-    void seat;
-    if (grant.keywords) for (const keyword of grant.keywords) keywords.add(keyword);
     attack += grant.attack ?? 0;
     defense += grant.defense ?? 0;
   }
@@ -70,6 +100,55 @@ export function applyStaticGrants(
     // 12.13.3: Drain does not stack; a Set already de-duplicates.
   }
   return { attack, defense, keywords: [...keywords] };
+}
+
+function grantApplies(
+  state: MatchState,
+  card: CardId,
+  entry: { readonly source: CardId; readonly ability: StaticAbility },
+): boolean {
+  const grant = entry.ability.grant;
+  if (!grant) return entry.source === card;
+  return matchesFilter(state, card, grant.filter, entry.source);
+}
+
+/** Whether a restriction on a static currently covers this card (10.9 non-numeric layer). */
+export function hasRestriction(
+  state: MatchState,
+  card: CardId,
+  pred: (restriction: Restriction) => boolean,
+): boolean {
+  for (const entry of activeStatics(state)) {
+    if (!staticLive(state, entry)) continue;
+    const restriction = entry.ability.restriction;
+    if (!restriction || !pred(restriction)) continue;
+    if (!grantApplies(state, card, entry)) continue;
+    return true;
+  }
+  return false;
+}
+
+export function controllerHasRestriction(
+  state: MatchState,
+  seat: Seat,
+  pred: (restriction: Restriction) => boolean,
+): boolean {
+  return state.seats[seat].field.some((card) => hasRestriction(state, card.id, pred));
+}
+
+export function wouldBeReplaced(
+  state: MatchState,
+  card: CardId,
+  would: Replacement['would'],
+): boolean {
+  for (const entry of activeStatics(state)) {
+    if (!staticLive(state, entry)) continue;
+    const replacement = entry.ability.replacement;
+    if (replacement?.would !== would || replacement.instead !== 'prevent') continue;
+    if (!grantApplies(state, card, entry) && entry.source !== card) continue;
+    return true;
+  }
+  return false;
 }
 
 export function staticPlayCost(state: MatchState, card: CardId): number {
@@ -80,6 +159,7 @@ export function staticPlayCost(state: MatchState, card: CardId): number {
 
   for (const entry of activeStatics(state)) {
     if (entry.seat !== owner) continue;
+    if (!staticLive(state, entry)) continue;
     const { ability } = entry;
     if (ability.costIf && evaluateCondition(state, owner, ability.costIf.cond, {}, card)) {
       cost = ability.costIf.amount;
@@ -87,12 +167,17 @@ export function staticPlayCost(state: MatchState, card: CardId): number {
   }
   for (const entry of activeStatics(state)) {
     if (entry.seat !== owner) continue;
+    if (!staticLive(state, entry)) continue;
     const delta = entry.ability.costDelta;
     if (!delta) continue;
     if (!matchesFilter(state, card, delta.filter, entry.source)) continue;
+    if (delta.if && !evaluateCondition(state, owner, delta.if, {}, card)) continue;
     if (delta.nthSpell !== undefined) {
       if (def.kind !== 'spell') continue;
-      if (state.seats[owner].flags.spellsPlayed + 1 !== delta.nthSpell) continue;
+      const matching = state.seats[owner].flags.playedThisTurn.filter((id) =>
+        matchesFilter(state, id, delta.filter, entry.source),
+      );
+      if (matching.length + 1 !== delta.nthSpell) continue;
     }
     cost += delta.amount;
   }
@@ -110,4 +195,73 @@ export function playRestricted(state: MatchState, seat: Seat, card: CardId): boo
     if (!evaluateCondition(state, seat, ability.playRestriction, {}, card)) return true;
   }
   return false;
+}
+
+/** Printed evolve cost plus this follower's `evolveCostDelta` statics. */
+export function evolvePlayCost(state: MatchState, card: CardId): number | null {
+  const printed = parseEvolveCost(definitionOf(state, card).text);
+  if (printed === null) return null;
+  const owner = state.cards[card]?.owner;
+  if (owner === undefined) return printed;
+  let cost = printed;
+  for (const entry of activeStatics(state)) {
+    if (entry.seat !== owner) continue;
+    if (!staticLive(state, entry)) continue;
+    if (entry.source !== card) continue;
+    const delta = entry.ability.evolveCostDelta;
+    if (delta === undefined) continue;
+    cost += evaluateValue(state, owner, delta, {}, card);
+  }
+  return Math.max(0, cost);
+}
+
+/** Replacement and static damage modifiers (10.10, 10.9). */
+export function modifiedDamage(
+  state: MatchState,
+  args: {
+    readonly source: CardId | null;
+    readonly target: CardId | 'leader';
+    readonly targetSeat: Seat;
+    readonly amount: number;
+    readonly combat: boolean;
+  },
+): number {
+  let amount = args.amount;
+  for (const entry of activeStatics(state)) {
+    if (!staticLive(state, entry)) continue;
+    const { ability } = entry;
+    if (ability.damageDealtDelta && args.source) {
+      if (
+        matchesFilter(state, args.source, { self: true }, entry.source) ||
+        entry.source === args.source
+      ) {
+        amount += ability.damageDealtDelta;
+      }
+    }
+    if (ability.damageTakenDelta && args.target !== 'leader') {
+      if (
+        matchesFilter(state, args.target, ability.grant?.filter ?? { self: true }, entry.source)
+      ) {
+        amount += ability.damageTakenDelta;
+      }
+    }
+    const replacement = ability.replacement;
+    if (replacement?.would === 'takeDamage') {
+      const applies =
+        args.target !== 'leader'
+          ? matchesFilter(
+              state,
+              args.target,
+              ability.grant?.filter ?? { self: true },
+              entry.source,
+            ) || args.target === entry.source
+          : ability.grant === undefined;
+      if (!applies) continue;
+      if (replacement.instead === 'prevent') return 0;
+      if (replacement.instead === 'modify' && replacement.amount !== undefined) {
+        amount = evaluateValue(state, entry.seat, replacement.amount, {}, entry.source);
+      }
+    }
+  }
+  return Math.max(0, amount);
 }

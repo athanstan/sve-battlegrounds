@@ -8,22 +8,33 @@ import {
   paySuperEvolutionPoints,
   updateFieldCard,
 } from './move';
-import { parseEvolveCost, parseServeCost } from '../abilities/generic';
+import { parseServeCost } from '../abilities/generic';
+import { evolvePlayCost } from '../abilities/statics';
 
 export function correspondingEvolve(
   state: MatchState,
   seat: Seat,
   fieldCard: CardId,
 ): CardId | undefined {
-  const name = definitionOf(state, fieldCard).name;
-  return state.seats[seat].evolveDeck.find((id) => definitionOf(state, id).name === name);
+  const fieldNames = new Set(namesOf(state, fieldCard));
+  return state.seats[seat].evolveDeck.find((id) => {
+    const def = definitionOf(state, id);
+    if (fieldNames.has(def.name)) return true;
+    const script = state.scripts[def.id];
+    return script?.alsoNamed?.some((name) => fieldNames.has(name)) ?? false;
+  });
+}
+
+export function namesOf(state: MatchState, card: CardId): readonly string[] {
+  const def = definitionOf(state, card);
+  const aliases = state.scripts[def.id]?.alsoNamed ?? [];
+  return aliases.length === 0 ? [def.name] : [def.name, ...aliases];
 }
 
 export function correspondingCarrot(state: MatchState, seat: Seat): CardId | undefined {
   return state.seats[seat].evolveDeck.find((id) => {
-    const def = definitionOf(state, id);
-    const script = state.scripts[def.id];
-    return (script?.alsoNamed?.includes('Carrot') ?? false) || def.name.includes('Carrot');
+    const names = namesOf(state, id);
+    return names.includes('Carrot') || names.some((name) => name.includes('Carrot'));
   });
 }
 
@@ -40,8 +51,7 @@ export function evolveFollower(
   const evolveCard = correspondingEvolve(t.state, seat, fieldCard);
   if (!evolveCard) return false;
   if (t.state.seats[seat].evolveZone.some((link) => link.linkedTo === fieldCard)) return false;
-  const printed = definitionOf(t.state, fieldCard);
-  const cost = args.free ? 0 : (parseEvolveCost(printed.text) ?? 0);
+  const cost = args.free ? 0 : (evolvePlayCost(t.state, fieldCard) ?? 0);
   if (!args.free) {
     const pp = args.useEvolutionPoint ? Math.max(0, cost - 1) : cost;
     payPlayPoints(t, seat, pp);

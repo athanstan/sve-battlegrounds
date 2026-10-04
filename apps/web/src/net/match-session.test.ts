@@ -89,6 +89,22 @@ describe('MatchSession', () => {
     expect(h.tokens).toEqual(['resume-1', 'resume-2']);
   });
 
+  it('shows the turn-order prompt from the opening events, without waiting for a snapshot', () => {
+    const created = newMatch('session-open');
+    const viewer = seatViewer(0);
+    const events: ClientEnvelope[] = created.events.flatMap((event, index) => {
+      const projected = projectEvent(event, viewer, created.state);
+      return projected ? [{ seq: index + 1, event: projected }] : [];
+    });
+    const room = new FakeRoom();
+    const session = new MatchSession(room, hooks());
+    room.serve(MatchMessage.events, { fromSeq: 0, toSeq: created.state.seq, events });
+
+    expect(room.sent).toEqual([]);
+    expect(session.getState().view?.waitingOn?.kind).toBe('turnOrder');
+    expect(session.getState().view).toEqual(viewOf(created.state, 0));
+  });
+
   it('shows a snapshot as a replacement and a following run of events as a move', () => {
     const { created, view, after, events } = firstTurn();
     const room = new FakeRoom();

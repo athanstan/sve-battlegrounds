@@ -3,6 +3,7 @@ import type { CardId, Seat } from '../model/ids';
 import { MAX_PLAY_POINTS_CEILING } from '../model/limits';
 import type { MatchState, ResourceName } from '../state/state';
 import type { Transcript } from './transcript';
+import { controllerHasRestriction, hasRestriction } from '../abilities/statics';
 
 /**
  * Engine-owned verbs, named as the rules name them. Scripts and steps pick a verb; only the
@@ -12,6 +13,7 @@ import type { Transcript } from './transcript';
 /** Draw (5.10): move the top card(s) of the deck to the hand. Zero or fewer draws nothing (1.3.2.2). */
 export function draw(t: Transcript, seat: Seat, count: number, cause: DrawCause): void {
   if (count <= 0) return;
+  if (controllerHasRestriction(t.state, seat, (r) => r.cantDraw === true)) return;
   const cards = t.state.seats[seat].deck.slice(0, count);
   if (cards.length > 0) t.emit({ type: 'cardsDrawn', seat, cards, cause });
   // Drawing the cards that exist still happens; the loss is handled at the next rules handling.
@@ -23,10 +25,16 @@ export function discard(t: Transcript, seat: Seat, cards: readonly CardId[]): vo
   if (cards.length > 0) t.emit({ type: 'cardsDiscarded', seat, cards });
 }
 
-/** Refresh (5.4): turn engaged field cards back to reserved. */
+/** Refresh (5.4): turn engaged field cards back to reserved. Boxed followers skip this. */
 export function refreshField(t: Transcript, seat: Seat): void {
   const engaged = t.state.seats[seat].field
-    .filter((card) => card.placement === 'engaged')
+    .filter(
+      (card) =>
+        card.placement === 'engaged' &&
+        (card.boxedUntilTurn ?? -1) < t.state.turn &&
+        (card.skipRefreshUntilTurn ?? -1) < t.state.turn &&
+        !hasRestriction(t.state, card.id, (r) => r.cantRefresh === true),
+    )
     .map((card) => card.id);
   if (engaged.length > 0) t.emit({ type: 'fieldRefreshed', seat, cards: engaged });
 }

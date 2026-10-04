@@ -2,6 +2,7 @@ import {
   CARD_CLASSES,
   KEYWORDS,
   asCardDefId,
+  cardKey,
   type CardClass,
   type CardDefinition,
   type DeckList,
@@ -43,8 +44,8 @@ const wireDeck = z.object({
 const wireCard = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  type: z.enum(['leader', 'follower', 'spell', 'amulet']),
-  special: z.enum(['evolved', 'token']).nullish(),
+  type: z.enum(['leader', 'follower', 'spell', 'amulet', 'equipment', 'crest']),
+  special: z.enum(['evolved', 'token', 'advanced']).nullish(),
   class: z.enum(CARD_CLASSES),
   universe: z.string().nullish(),
   traits: z.array(z.string()).nullish(),
@@ -54,6 +55,9 @@ const wireCard = z.object({
   keywords: z.array(z.string()).nullish(),
   text: z.string().nullish(),
   artUrl: z.string().nullish(),
+  key: z.string().min(1).nullish(),
+  copyLimit: z.int().min(1).nullish(),
+  originalCardId: z.string().min(1).nullish(),
 });
 
 export const userResponse = wireUser;
@@ -81,11 +85,13 @@ export function toDeck(wire: WireDeck): SsDeck {
 }
 
 export function toCard(wire: WireCard): CardDefinition {
+  const special = wire.special ?? null;
   return {
     id: asCardDefId(wire.id),
+    key: wire.key ?? cardKey(wire.name, special, wire.originalCardId ?? null, wire.type),
     name: wire.name,
     kind: wire.type,
-    special: wire.special ?? null,
+    special,
     cardClass: wire.class satisfies CardClass,
     universe: wire.universe ?? null,
     traits: wire.traits ?? [],
@@ -97,5 +103,6 @@ export function toCard(wire: WireCard): CardDefinition {
     ),
     text: wire.text ?? '',
     artUrl: wire.artUrl ?? null,
+    ...(wire.copyLimit ? { copyLimit: wire.copyLimit } : {}),
   };
 }

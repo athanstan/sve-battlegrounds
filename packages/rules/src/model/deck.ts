@@ -23,7 +23,7 @@ export type DeckIssue =
   | {
       readonly code: 'notMainDeckCard';
       readonly card: CardDefId;
-      readonly reason: 'leader' | 'evolved' | 'token';
+      readonly reason: 'leader' | 'evolved' | 'token' | 'advanced';
     }
   | { readonly code: 'notEvolveDeckCard'; readonly card: CardDefId }
   | {
@@ -77,10 +77,12 @@ export function validateDeck(deck: DeckList, catalog: CardCatalog): DeckIssue[] 
   const leaderClass = leader?.cardClass;
   const leaderUniverse = leader?.universe ?? null;
 
-  const copiesByName = new Map<string, { main: number; evolve: number }>();
+  const copiesByName = new Map<string, { main: number; evolve: number; limit: number }>();
   const note = (def: CardDefinition, zone: 'main' | 'evolve', count: number) => {
-    const entry = copiesByName.get(def.name) ?? { main: 0, evolve: 0 };
+    const limit = def.copyLimit ?? DECK_RULES.copiesPerName;
+    const entry = copiesByName.get(def.name) ?? { main: 0, evolve: 0, limit };
     entry[zone] += count;
+    entry.limit = Math.max(entry.limit, limit);
     copiesByName.set(def.name, entry);
   };
 
@@ -98,7 +100,7 @@ export function validateDeck(deck: DeckList, catalog: CardCatalog): DeckIssue[] 
       if (zone === 'main') {
         const reason = def.kind === 'leader' ? 'leader' : def.special;
         if (reason) issues.push({ code: 'notMainDeckCard', card: def.id, reason });
-      } else if (def.special !== 'evolved') {
+      } else if (def.special !== 'evolved' && def.special !== 'advanced') {
         issues.push({ code: 'notEvolveDeckCard', card: def.id });
       }
       if (leaderUniverse !== null || def.universe !== null) {
@@ -138,11 +140,11 @@ export function validateDeck(deck: DeckList, catalog: CardCatalog): DeckIssue[] 
     issues.push({ code: 'evolveSize', size: evolveSize, max: DECK_RULES.evolveMax });
   }
 
-  // 6.1.1.4: up to three copies of a name in the main deck, and up to three in the evolve deck.
+  // 6.1.1.4: up to three copies of a name per pile, unless the printing raises the cap.
   for (const [name, copies] of copiesByName) {
     for (const count of [copies.main, copies.evolve]) {
-      if (count > DECK_RULES.copiesPerName) {
-        issues.push({ code: 'tooManyCopies', name, count, limit: DECK_RULES.copiesPerName });
+      if (count > copies.limit) {
+        issues.push({ code: 'tooManyCopies', name, count, limit: copies.limit });
       }
     }
   }

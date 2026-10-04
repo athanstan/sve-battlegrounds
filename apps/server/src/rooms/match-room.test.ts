@@ -105,6 +105,10 @@ describe('opening a table', () => {
     const [askedPlayer, other] = asked?.seat === 0 ? [alice, bob] : [bob, alice];
     expect(askedPlayer.view?.prompt?.kind).toBe('turnOrder');
     expect(other.view?.prompt).toBeNull();
+    expect(alice.snapshots).toBeGreaterThanOrEqual(1);
+    expect(bob.snapshots).toBeGreaterThanOrEqual(1);
+    expect(alice.gaps).toBe(0);
+    expect(bob.gaps).toBe(0);
   });
 
   it('lets the first player redraw and the second keep', async () => {

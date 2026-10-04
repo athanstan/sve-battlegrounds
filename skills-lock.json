@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "typescript-expert": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/typescript-expert/SKILL.md",
+      "computedHash": "13d996860ec89780cfc6fae411cd6526dc13d6a476ab318d73a51fea9d45667a"
+    }
+  }
+}

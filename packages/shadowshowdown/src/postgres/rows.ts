@@ -2,6 +2,8 @@ import {
   CARD_CLASSES,
   KEYWORDS,
   asCardDefId,
+  cardKey,
+  keywordsFromText,
   type CardClass,
   type CardDefinition,
   type CardKind,
@@ -34,6 +36,7 @@ export interface CardRow {
   readonly abilities: unknown;
   readonly effects: string | null;
   readonly image: string | null;
+  readonly deck_restriction: number | null;
 }
 
 /** One `deck_cards` row joined with the facts that decide which pile the card goes to. */
@@ -50,16 +53,19 @@ const KIND_BY_MAIN_TYPE: Readonly<Record<string, CardKind>> = {
   Follower: 'follower',
   Spell: 'spell',
   Amulet: 'amulet',
+  Equipment: 'equipment',
+  Crest: 'crest',
 };
 
 /**
- * `Advanced`, `Equipment`, `Crest` and `Evolution Point` are outside the first slice. Leaving them
- * out of the catalog makes a deck that uses them *illegal* (unknown card) instead of crashing a match.
+ * Evolution Point cards are physical-only (never a match object). Everything else the dump can
+ * name maps: Advanced is a special type on a follower or spell; Equipment and Crest are kinds.
  */
 const SPECIAL_BY_SUB_TYPE: Readonly<Record<string, SpecialType | null>> = {
   '': null,
   Evolved: 'evolved',
   Token: 'token',
+  Advanced: 'advanced',
 };
 
 const CLASS_NAMES: ReadonlySet<string> = new Set(CARD_CLASSES);
@@ -100,6 +106,8 @@ export function plainText(html: string | null): string {
     // Inline icons carry their meaning in `alt` ("[attack]"); keep that, drop the markup.
     .replace(/<img\b[^>]*\balt="([^"]*)"[^>]*>/gi, '$1')
     .replace(/<[^>]*>/g, '')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCharCode(Number(dec)))
     .replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/g, (entity) => ENTITIES[entity] ?? entity)
     .split('\n')
     .map((line) => line.replace(/\s+/g, ' ').trim())
@@ -134,7 +142,7 @@ export interface CardMapping {
   readonly artUrlFor: (image: string) => string;
 }
 
-/** `undefined` for printings the first slice does not model. */
+/** `undefined` for printings the match does not model (Evolution Point cards). */
 export function toCardDefinition(row: CardRow, mapping: CardMapping): CardDefinition | undefined {
   const kind = KIND_BY_MAIN_TYPE[row.main_type];
   const special = SPECIAL_BY_SUB_TYPE[row.sub_type ?? ''];
@@ -142,8 +150,12 @@ export function toCardDefinition(row: CardRow, mapping: CardMapping): CardDefini
   if (!kind || special === undefined || !CLASS_NAMES.has(cardClass)) return undefined;
 
   const isFollower = kind === 'follower';
+  const copyLimit =
+    row.deck_restriction && row.deck_restriction > 0 ? row.deck_restriction : undefined;
+  const text = plainText(row.effects);
   return {
     id: asCardDefId(row.id),
+    key: cardKey(row.name, special, row.original_card_id, kind),
     name: row.name,
     kind,
     special,
@@ -153,9 +165,10 @@ export function toCardDefinition(row: CardRow, mapping: CardMapping): CardDefini
     cost: row.cost,
     attack: isFollower ? row.atk : null,
     defense: isFollower ? row.health : null,
-    keywords: keywordsOf(row.abilities),
-    text: plainText(row.effects),
+    keywords: [...new Set([...keywordsOf(row.abilities), ...keywordsFromText(text)])],
+    text,
     artUrl: row.image ? mapping.artUrlFor(row.image) : null,
+    ...(copyLimit !== undefined ? { copyLimit } : {}),
   };
 }
 
@@ -170,7 +183,7 @@ export function toDeckList(rows: readonly DeckCardRow[]): DeckList {
       leader ||= row.card_id;
       continue;
     }
-    const pile = row.sub_type === 'Evolved' ? evolve : main;
+    const pile = row.sub_type === 'Evolved' || row.sub_type === 'Advanced' ? evolve : main;
     pile.set(row.card_id, (pile.get(row.card_id) ?? 0) + row.quantity);
   }
 

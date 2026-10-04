@@ -1,36 +1,79 @@
-import type { CardDefinition } from '../model/cards';
+import { cardKey, type CardDefinition } from '../model/cards';
 import { asCardDefId } from '../model/ids';
 
-/** Appendix A: token prototypes used by the two decks. Both carry the Pixie trait. */
+const token = (
+  name: string,
+  spec: Pick<CardDefinition, 'kind' | 'cardClass' | 'cost' | 'attack' | 'defense' | 'traits' | 'keywords' | 'text'>,
+): CardDefinition => ({
+  id: asCardDefId(`token:${name.replace(/\s+/g, '')}`),
+  key: cardKey(name, 'token'),
+  name,
+  special: 'token',
+  universe: null,
+  artUrl: null,
+  ...spec,
+});
+
+/** Appendix A prototypes plus tokens the live Swordcraft dump summons. */
 export const DEFAULT_TOKENS: Readonly<Record<string, CardDefinition>> = {
-  Fairy: {
-    id: asCardDefId('token:Fairy'),
-    name: 'Fairy',
+  Fairy: token('Fairy', {
     kind: 'follower',
-    special: 'token',
     cardClass: 'forestcraft',
-    universe: null,
     traits: ['Pixie'],
     cost: 1,
     attack: 1,
     defense: 1,
     keywords: [],
     text: '',
-    artUrl: null,
-  },
-  'Fairy Wisp': {
-    id: asCardDefId('token:FairyWisp'),
-    name: 'Fairy Wisp',
+  }),
+  'Fairy Wisp': token('Fairy Wisp', {
     kind: 'follower',
-    special: 'token',
     cardClass: 'forestcraft',
-    universe: null,
     traits: ['Pixie'],
     cost: 0,
     attack: 1,
     defense: 1,
     keywords: [],
     text: '',
-    artUrl: null,
-  },
+  }),
+  'Shield Guardian': token('Shield Guardian', {
+    kind: 'follower',
+    cardClass: 'swordcraft',
+    traits: ['Officer'],
+    cost: 1,
+    attack: 1,
+    defense: 1,
+    keywords: ['ward'],
+    text: 'Ward.',
+  }),
+  'Bullet Bike': token('Bullet Bike', {
+    kind: 'amulet',
+    cardClass: 'neutral',
+    traits: ['Wasteland', 'Mount'],
+    cost: 1,
+    attack: null,
+    defense: null,
+    keywords: [],
+    text: "[act]\nBury this card: Select a follower on your field. Give it Rush and, if it's a\nWasteland follower, [attack]+1.",
+  }),
+  'Dutiful Steed': token('Dutiful Steed', {
+    kind: 'amulet',
+    cardClass: 'neutral',
+    traits: ['Wasteland', 'Mount', 'Beast'],
+    cost: 1,
+    attack: null,
+    defense: null,
+    keywords: [],
+    text: "[act]\nBury this card: Select a follower on your field and, if it's a Wasteland\nfollower, give it [attack]+1/[defense]+1.",
+  }),
+  'Val, Trusty Getaway Car': token('Val, Trusty Getaway Car', {
+    kind: 'amulet',
+    cardClass: 'swordcraft',
+    traits: ['Wasteland', 'Mount'],
+    cost: 2,
+    attack: null,
+    defense: null,
+    keywords: ['strike', 'storm'],
+    text: '[act]\n[engage] a Bunny & Baron, Specter Duo on your field:\nManeuver this card. (For the rest of this turn, it becomes a follower with\n[attack]3/[defense]3.)\n[act]\n[cost01], [engage] 2 followers on your field:\nManeuver this card.\nStorm.\nStrike - If there\'s another Wasteland follower on your field, draw a card.',
+  }),
 };

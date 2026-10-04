@@ -244,9 +244,14 @@ export class Board {
         existing.update(slot);
       } else {
         const made = new AvatarActor(slot, art);
-        made.eventMode = 'none';
+        made.eventMode = 'static';
         made.cursor = 'default';
         made.on('pointertap', () => this.#deps.onAvatarPress?.(slot.seat));
+        made.on('pointerover', (event: { global: { x: number; y: number } }) => {
+          this.#hoverAt = { x: event.global.x, y: event.global.y };
+          this.#deps.onCardHover?.(made.slot.leader, this.#hoverAt);
+        });
+        made.on('pointerout', () => this.#deps.onCardHover?.(null, this.#hoverAt));
         this.#avatars.set(slot.seat, made);
         layers.hud.addChild(made);
       }
@@ -462,9 +467,7 @@ export class Board {
     }
     for (const avatar of this.#avatars.values()) {
       const targeted = this.#leaderTargets.has(avatar.slot.seat);
-      avatar.eventMode = targeted ? 'static' : 'none';
-      avatar.cursor = targeted ? 'pointer' : 'default';
-      if (targeted) avatar.state.ring = 1;
+      avatar.setTargeted(targeted);
     }
   }
 

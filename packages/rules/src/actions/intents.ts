@@ -12,7 +12,10 @@ export type Choice =
   | { readonly kind: 'mode'; readonly id: string }
   | { readonly kind: 'confirm'; readonly yes: boolean }
   | { readonly kind: 'allocate'; readonly amounts: readonly number[] }
-  | { readonly kind: 'orderPending'; readonly id: number };
+  | { readonly kind: 'orderPending'; readonly id: number }
+  | { readonly kind: 'number'; readonly value: number }
+  | { readonly kind: 'name'; readonly value: string }
+  | { readonly kind: 'order'; readonly cards: readonly CardId[] };
 
 /**
  * Everything a client may ask for. Clients never send board mutations: there is no

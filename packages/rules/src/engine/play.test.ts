@@ -16,6 +16,7 @@ import { DEFAULT_TOKENS } from '../abilities/tokens';
 import type { CardScript } from '../abilities/spec';
 import { createMatch } from './create';
 import { textHash } from '../abilities/generic';
+import { cardKey } from '../model/cards';
 import { reduce } from './reduce';
 
 const promptOf = (state: MatchState): Prompt => {
@@ -156,6 +157,24 @@ describe('tokens (Appendix A)', () => {
     });
     expect(DEFAULT_TOKENS['Fairy Wisp']).toMatchObject({ cost: 0, attack: 1, defense: 1 });
   });
+
+  it('includes Wasteland Sword tokens', () => {
+    expect(DEFAULT_TOKENS['Shield Guardian']).toMatchObject({
+      kind: 'follower',
+      keywords: ['ward'],
+      attack: 1,
+      defense: 1,
+    });
+    expect(DEFAULT_TOKENS['Bullet Bike']).toMatchObject({
+      kind: 'amulet',
+      traits: ['Wasteland', 'Mount'],
+    });
+    expect(DEFAULT_TOKENS['Dutiful Steed']?.traits).toEqual(['Wasteland', 'Mount', 'Beast']);
+    expect(DEFAULT_TOKENS['Val, Trusty Getaway Car']).toMatchObject({
+      kind: 'amulet',
+      cost: 2,
+    });
+  });
 });
 
 describe('ability timing (CR 7.4.1, 10.7)', () => {
@@ -163,6 +182,7 @@ describe('ability timing (CR 7.4.1, 10.7)', () => {
     const text = 'At the start of your end phase, draw a card.';
     const defId = asCardDefId('test-follower-0');
     const script: CardScript = {
+      key: cardKey('Test Follower 0'),
       name: 'Test Follower 0',
       textHash: textHash(text),
       abilities: [

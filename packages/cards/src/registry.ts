@@ -1,94 +1,41 @@
-import { scriptKey, textHash, type CardDefinition, type CardScript } from '@sve/rules';
-import { amataz, amatazEvolved } from './forestcraft/amataz';
-import { ariaFairyPrincess, ariaFairyPrincessEvolved } from './forestcraft/aria-fairy-princess';
-import { ariaLady, ariaLadyEvolved } from './forestcraft/aria-lady';
-import { cc, ccEvolved } from './forestcraft/cc';
-import { cynthia, cynthiaEvolved } from './forestcraft/cynthia';
-import { fairyCircle } from './forestcraft/fairy-circle';
-import { fairyWhisperer, fairyWhispererEvolved } from './forestcraft/fairy-whisperer';
-import { feyboltArcher, feyboltArcherEvolved } from './forestcraft/feybolt-archer';
-import { liza } from './forestcraft/liza';
-import { naturesGuidance } from './forestcraft/natures-guidance';
-import { piercye, piercyeEvolved } from './forestcraft/piercye';
-import { pixieOfTheForest } from './forestcraft/pixie-of-the-forest';
-import { spinaria, spinariaEvolved } from './forestcraft/spinaria';
-import { titania, titaniaEvolved } from './forestcraft/titania';
-import { waterFairy } from './forestcraft/water-fairy';
-import { carrot, miracleCarrot, victoryCarrot } from './umamusume/carrots';
-import { chevalGrand, chevalGrandEvolved } from './umamusume/cheval-grand';
-import { daiwaScarlet, daiwaScarletEvolved } from './umamusume/daiwa-scarlet';
-import {
-  grassWonder,
-  mejiroMcQueen,
-  niceNature,
-  silenceSuzuka,
-  specialWeek,
-  symboliRudolf,
-  tokaiTeio,
-} from './umamusume/fillers';
-import { goldShip, goldShipEvolved } from './umamusume/gold-ship';
-import { hishiMiracle, hishiMiracleEvolved } from './umamusume/hishi-miracle';
-import { progenitors } from './umamusume/progenitors';
-import { sevenMoreCentimeters } from './umamusume/seven-more-centimeters';
-import { trialInitiation } from './umamusume/trial-initiation';
-import { vodka, vodkaEvolved } from './umamusume/vodka';
+import { textHash, type CardDefinition, type CardScript } from '@sve/rules';
+import { SCRIPT_MODULES } from './scripts.generated';
 
-export const ALL_SCRIPTS: readonly CardScript[] = [
-  fairyCircle,
-  feyboltArcher,
-  feyboltArcherEvolved,
-  ariaFairyPrincess,
-  ariaFairyPrincessEvolved,
-  ariaLady,
-  ariaLadyEvolved,
-  piercye,
-  piercyeEvolved,
-  titania,
-  titaniaEvolved,
-  cynthia,
-  cynthiaEvolved,
-  spinaria,
-  spinariaEvolved,
-  cc,
-  ccEvolved,
-  amataz,
-  amatazEvolved,
-  waterFairy,
-  pixieOfTheForest,
-  fairyWhisperer,
-  fairyWhispererEvolved,
-  naturesGuidance,
-  liza,
-  daiwaScarlet,
-  daiwaScarletEvolved,
-  vodka,
-  vodkaEvolved,
-  chevalGrand,
-  chevalGrandEvolved,
-  hishiMiracle,
-  hishiMiracleEvolved,
-  trialInitiation,
-  sevenMoreCentimeters,
-  carrot,
-  miracleCarrot,
-  victoryCarrot,
-  progenitors,
-  goldShip,
-  goldShipEvolved,
-  silenceSuzuka,
-  specialWeek,
-  tokaiTeio,
-  grassWonder,
-  niceNature,
-  mejiroMcQueen,
-  symboliRudolf,
-];
+function isCardScript(value: unknown): value is CardScript {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as CardScript).key === 'string' &&
+    typeof (value as CardScript).textHash === 'string' &&
+    Array.isArray((value as CardScript).abilities)
+  );
+}
 
-const BY_KEY = new Map(
-  ALL_SCRIPTS.map((script) => [scriptKey(script.name, script.textHash), script]),
+/** Every script of every `<craft>/<card>.ts` file (see `pnpm gen:scripts`). */
+export const ALL_SCRIPTS: readonly CardScript[] = SCRIPT_MODULES.flatMap((module) =>
+  Object.values(module).filter(isCardScript),
 );
 
-/** Returns the pinned script when the name and printed-text hash both match. */
+const BY_KEY = new Map(ALL_SCRIPTS.map((script) => [script.key, script]));
+
+function hashesOf(script: CardScript): ReadonlySet<string> {
+  return new Set([script.textHash, ...(script.alsoHashes ?? [])]);
+}
+
+/**
+ * A matching key with the same printed-text hash is scripted. A matching key with a
+ * different hash is treated as unscripted (text drift).
+ */
 export function scriptFor(def: CardDefinition): CardScript | null {
-  return BY_KEY.get(scriptKey(def.name, textHash(def.text))) ?? null;
+  const script = BY_KEY.get(def.key);
+  if (!script) return null;
+  if (!hashesOf(script).has(textHash(def.text))) return null;
+  return script;
+}
+
+export function scriptDrift(def: CardDefinition): CardScript | null {
+  const script = BY_KEY.get(def.key);
+  if (!script) return null;
+  if (hashesOf(script).has(textHash(def.text))) return null;
+  return script;
 }

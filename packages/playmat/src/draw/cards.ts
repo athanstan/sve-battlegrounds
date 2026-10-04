@@ -72,6 +72,8 @@ const KIND_LABEL: Readonly<Record<CardDefinition['kind'], string>> = {
   follower: 'Follower',
   spell: 'Spell',
   amulet: 'Amulet',
+  equipment: 'Equipment',
+  crest: 'Crest',
 };
 
 function typeLine(def: CardDefinition): string {

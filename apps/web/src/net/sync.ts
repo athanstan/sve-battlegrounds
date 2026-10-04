@@ -5,9 +5,15 @@ import type { Frame } from './frame';
 /**
  * Keeping a view in step with the server's log.
  *
- * The server sends the whole view once (`snapshot`), then runs of events that each name the log
- * position they start from. A run is applied only if it starts exactly where this client is; any
- * other start means something was missed, and the only safe move is to ask for a fresh snapshot.
+ * The server sends a snapshot on join, reconnect and resync. Everything else is a run of events
+ * that names the log position it starts from. A run is applied only if it starts exactly where
+ * this client is; any other start means something was missed, and the only safe move is to ask
+ * for a fresh snapshot.
+ *
+ * The one exception is the opening of a match: those events start at seq 0 and begin with
+ * `matchCreated`, which `foldView` can apply to an empty client. Treating that as a gap would
+ * hide the turn-order prompt until a resync round-trip finished.
+ *
  * Pure functions, so the rule is tested without a socket.
  */
 
@@ -39,11 +45,11 @@ export function applySnapshot(message: SnapshotMessage): SyncStep {
 
 export function applyEvents(state: SyncState, message: EventsMessage): SyncStep {
   if (state.resyncing) return { state, frame: null, resync: false };
-  if (state.view === null || message.fromSeq !== state.seq) {
+  if (message.fromSeq !== state.seq) {
     return { state: { ...state, resyncing: true }, frame: null, resync: true };
   }
 
-  let view: MatchView = state.view;
+  let view: MatchView | null = state.view;
   const events = message.events.map((envelope) => envelope.event);
   try {
     for (const event of events) view = foldView(view, event);
@@ -52,9 +58,14 @@ export function applyEvents(state: SyncState, message: EventsMessage): SyncStep 
     return { state: { ...state, resyncing: true }, frame: null, resync: true };
   }
 
+  if (view === null) {
+    return { state: { ...state, resyncing: true }, frame: null, resync: true };
+  }
+
   return {
     state: { view, seq: message.toSeq, resyncing: false },
-    frame: { view, events, kind: 'delta' },
+    // First picture of a match: land it, do not animate from nothing.
+    frame: { view, events, kind: state.view === null ? 'snapshot' : 'delta' },
     resync: false,
   };
 }

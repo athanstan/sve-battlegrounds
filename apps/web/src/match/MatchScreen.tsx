@@ -20,7 +20,7 @@ import { MatchMenu } from './MatchMenu';
 import { Nameplate } from './Nameplate';
 import { describeOutcome } from './outcome-text';
 import { PlaymatCanvas } from './PlaymatCanvas';
-import { PromptBar } from './PromptBar';
+import { PromptBar, NumberBar, TextBar } from './PromptBar';
 import { promptUi, waitingLabel } from './prompt-model';
 import { tableNotice } from './table-notice';
 import { WaitingTable } from './WaitingTable';
@@ -229,14 +229,20 @@ function LiveMatch({ session }: { session: MatchSession }) {
   }, [notice, session]);
 
   if (!view) {
-    return presence?.status === 'waiting' ? (
-      <WaitingTable
-        presence={presence}
-        seated={presence.seats.some((plate) => plate.userId === user.id)}
-        onLeave={() => void leave()}
-      />
-    ) : (
-      <Splash>Taking your seat…</Splash>
+    // Same host box as the live table, so overlay fit is measured before the match starts.
+    // Returning a different root here used to leave prompts in unscaled design space.
+    return (
+      <div ref={host} className="relative h-full w-full overflow-hidden bg-ink">
+        {presence?.status === 'waiting' ? (
+          <WaitingTable
+            presence={presence}
+            seated={presence.seats.some((plate) => plate.userId === user.id)}
+            onLeave={() => void leave()}
+          />
+        ) : (
+          <Splash>Taking your seat…</Splash>
+        )}
+      </div>
     );
   }
 
@@ -336,7 +342,11 @@ function LiveMatch({ session }: { session: MatchSession }) {
 
       {waiting ? (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slab bg-ink/80 px-4 py-1.5 text-sm text-mist"
+          className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 rounded-full border px-5 py-2 text-sm ${
+            view.waitingOn?.kind === 'turnOrder'
+              ? 'border-gold/50 bg-ink/90 text-parchment'
+              : 'border-slab bg-ink/80 text-mist'
+          }`}
           style={at(800, OVERLAY.midlineY)}
         >
           {waiting}
@@ -345,22 +355,48 @@ function LiveMatch({ session }: { session: MatchSession }) {
 
       {ui && (ui.kind === 'choice' || ui.kind === 'pick') ? (
         <div
-          className="absolute z-10 -translate-x-1/2 -translate-y-full"
-          style={at(800, OVERLAY.promptBottomY)}
+          className={`absolute z-20 ${
+            view.prompt?.kind === 'turnOrder'
+              ? '-translate-x-1/2 -translate-y-1/2'
+              : '-translate-x-1/2 -translate-y-full'
+          }`}
+          style={at(
+            800,
+            view.prompt?.kind === 'turnOrder' ? OVERLAY.midlineY : OVERLAY.promptBottomY,
+          )}
         >
           <PromptBar
             ui={ui}
             picked={picked.length}
             sending={sending}
+            prominent={view.prompt?.kind === 'turnOrder'}
             onChoose={(intent) => send(intent)}
             onConfirm={confirmPicks}
           />
         </div>
       ) : null}
 
+      {ui?.kind === 'number' ? (
+        <div
+          className="absolute z-20 -translate-x-1/2 -translate-y-full"
+          style={at(800, OVERLAY.promptBottomY)}
+        >
+          <NumberBar ui={ui} sending={sending} onChoose={send} />
+        </div>
+      ) : null}
+
+      {ui?.kind === 'text' ? (
+        <div
+          className="absolute z-20 -translate-x-1/2 -translate-y-full"
+          style={at(800, OVERLAY.promptBottomY)}
+        >
+          <TextBar ui={ui} sending={sending} onChoose={send} />
+        </div>
+      ) : null}
+
       {ui?.kind === 'allocate' ? (
         <div
-          className="absolute z-10 -translate-x-1/2 -translate-y-full"
+          className="absolute z-20 -translate-x-1/2 -translate-y-full"
           style={at(800, OVERLAY.promptBottomY)}
         >
           <AllocateBar

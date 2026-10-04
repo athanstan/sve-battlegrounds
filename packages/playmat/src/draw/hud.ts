@@ -1,12 +1,11 @@
-import type { CardClass } from '@sve/rules';
 import { Container, FillGradient, Graphics, Rectangle, type Renderer, type Texture } from 'pixi.js';
-import { CARD, CLASS_STYLE, COLOR, PORTRAIT_RADIUS } from '../theme';
+import { CARD, COLOR, LEADER_CARD } from '../theme';
 import { bake } from './bake';
-import { drawCarrot, drawGlyph } from './glyphs';
+import { drawCarrot } from './glyphs';
 
 /**
- * The small, reusable pieces of the board's furniture: orbs, leader portraits, the defense
- * shield, and the soft glows and shadows that give cards weight. Each is vector art baked once.
+ * The small, reusable pieces of the board's furniture: orbs, the defense shield, and the soft
+ * glows and shadows that give cards weight. Each is vector art baked once.
  */
 
 const { width: W, height: H, radius: R } = CARD;
@@ -46,11 +45,11 @@ function shade(color: number, factor: number): number {
 export interface HudTextures {
   readonly orbLit: (color: number) => Texture;
   readonly orbDim: (color: number) => Texture;
-  readonly portrait: (cardClass: CardClass) => Texture;
   readonly shield: Texture;
   readonly shadow: Texture;
   readonly glow: (color: number) => Texture;
-  readonly ring: Texture;
+  /** Gold halo around a leader card: whose turn, or who the match is waiting on. */
+  readonly leaderHalo: Texture;
   readonly carrot: Texture;
   destroy(): void;
 }
@@ -99,58 +98,6 @@ export function createHudTextures(renderer: Renderer): HudTextures {
     g.circle(0, 0, 2.4).fill({ color, alpha: 0.4 });
     root.addChild(g);
     return keep(bake(renderer, root, orbFrame, 3));
-  });
-
-  const portraitSize = (PORTRAIT_RADIUS + 12) * 2;
-  const portrait = memo((cardClass: CardClass) => {
-    const style = CLASS_STYLE[cardClass];
-    const root = new Container();
-    const g = new Graphics();
-    const r = PORTRAIT_RADIUS;
-    g.circle(0, 0, r + 6).fill({ color: 0x000000, alpha: 0.35 });
-    g.circle(0, 0, r).fill(radial(shade(style.main, 0.95), shade(style.dark, 0.7), r * 2, 0.18));
-    root.addChild(g);
-
-    const emblem = new Graphics();
-    drawGlyph(emblem, cardClass, r * 0.62, style.light);
-    emblem.alpha = 0.85;
-    emblem.y = r * 0.04;
-    root.addChild(emblem);
-
-    const sheen = new Graphics();
-    sheen.circle(0, 0, r).fill(vertical(0xffffff, 0x000000)).stroke({ width: 0 });
-    sheen.alpha = 0.1;
-    root.addChild(sheen);
-
-    const rim = new Graphics();
-    rim
-      .circle(0, 0, r + 1.5)
-      .stroke({ width: 5, fill: vertical(COLOR.goldBright, COLOR.goldDeep) });
-    rim.circle(0, 0, r - 3).stroke({ width: 1, color: COLOR.ink, alpha: 0.8 });
-    for (let i = 0; i < 4; i++) {
-      const a = (i * Math.PI) / 2 + Math.PI / 4;
-      rim
-        .poly([
-          Math.cos(a) * (r + 6),
-          Math.sin(a) * (r + 6) - 4,
-          Math.cos(a) * (r + 6) + 4,
-          Math.sin(a) * (r + 6),
-          Math.cos(a) * (r + 6),
-          Math.sin(a) * (r + 6) + 4,
-          Math.cos(a) * (r + 6) - 4,
-          Math.sin(a) * (r + 6),
-        ])
-        .fill(COLOR.gold);
-    }
-    root.addChild(rim);
-    return keep(
-      bake(
-        renderer,
-        root,
-        new Rectangle(-portraitSize / 2, -portraitSize / 2, portraitSize, portraitSize),
-        2,
-      ),
-    );
   });
 
   const shield = (() => {
@@ -206,19 +153,34 @@ export function createHudTextures(renderer: Renderer): HudTextures {
     return keep(bake(renderer, root, new Rectangle(-PAD, -PAD, W + PAD * 2, H + PAD * 2), 2));
   });
 
-  const ring = (() => {
-    const size = (PORTRAIT_RADIUS + 22) * 2;
+  const leaderHalo = (() => {
+    const { width: lw, height: lh } = LEADER_CARD;
+    const pad = 32;
     const root = new Container();
     const g = new Graphics();
     for (let i = 0; i < 10; i++) {
-      g.circle(0, 0, PORTRAIT_RADIUS + 3 + i * 1.8).stroke({
-        width: 2.2,
+      const grow = 5 + i * 2.4;
+      g.roundRect(
+        -lw / 2 - grow,
+        -lh / 2 - grow,
+        lw + grow * 2,
+        lh + grow * 2,
+        12 + grow / 2,
+      ).stroke({
+        width: 2.6,
         color: COLOR.goldBright,
-        alpha: 0.5 - i * 0.05,
+        alpha: 0.55 - i * 0.045,
       });
     }
     root.addChild(g);
-    return keep(bake(renderer, root, new Rectangle(-size / 2, -size / 2, size, size), 2));
+    return keep(
+      bake(
+        renderer,
+        root,
+        new Rectangle(-lw / 2 - pad, -lh / 2 - pad, lw + pad * 2, lh + pad * 2),
+        2,
+      ),
+    );
   })();
 
   const carrot = (() => {
@@ -233,11 +195,10 @@ export function createHudTextures(renderer: Renderer): HudTextures {
   return {
     orbLit,
     orbDim,
-    portrait,
     shield,
     shadow,
     glow,
-    ring,
+    leaderHalo,
     carrot,
     destroy() {
       for (const texture of owned.splice(0)) texture.destroy(true);

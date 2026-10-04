@@ -112,6 +112,20 @@ const answerFor = (prompt: Prompt): Intent => {
         promptId: prompt.id,
         choice: { kind: 'orderPending', id: prompt.pending[0]?.id ?? 0 },
       };
+    case 'chooseNumber':
+      return {
+        type: 'choose',
+        promptId: prompt.id,
+        choice: { kind: 'number', value: prompt.min },
+      };
+    case 'declareName':
+      return { type: 'choose', promptId: prompt.id, choice: { kind: 'name', value: '' } };
+    case 'orderCards':
+      return {
+        type: 'choose',
+        promptId: prompt.id,
+        choice: { kind: 'order', cards: prompt.candidates },
+      };
   }
 };
 

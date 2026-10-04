@@ -1,11 +1,18 @@
-import { opponentOf, type CardId, type Seat } from '../model/ids';
+import { opponentOf, SEATS, type CardId, type Seat } from '../model/ids';
 import { type Prompt } from '../state/state';
 import type { ResolveAbilityFrame } from '../state/work';
 import type { Intent } from '../actions/intents';
 import type { PromptRequest } from '../engine/steps/step';
 import type { Transcript } from '../engine/transcript';
 import { refreshDerived, hasShownKeyword, fieldOf } from '../engine/derived';
-import { createTokens, dealDamage, moveCards, shuffleDeck, updateFieldCard } from '../engine/move';
+import {
+  createTokens,
+  dealDamage,
+  moveCards,
+  payPlayPoints,
+  shuffleDeck,
+  updateFieldCard,
+} from '../engine/move';
 import { discard, draw, engage, setResource } from '../engine/verbs';
 import { isSelection } from '../engine/queries';
 import { locate } from '../state/zones';
@@ -15,6 +22,8 @@ import { evaluateCondition, evaluateValue } from './values';
 import { evolveFollower } from '../engine/evolve';
 import { refOf } from '../state/state';
 import { updateWork } from '../engine/stack';
+import { answerFamilyOp, runFamilyOp } from './families';
+import { hasRestriction, wouldBeReplaced } from './statics';
 
 export type OpStep =
   | { readonly kind: 'ok'; readonly frame: ResolveAbilityFrame; readonly advance?: boolean }
@@ -74,9 +83,56 @@ function resolveCards(
   spec: string | { readonly each: Place; readonly filter?: CardFilter },
 ): CardId[] {
   if (spec === 'self') return [frame.source];
-  if (typeof spec === 'string')
-    return asCardIds(frame.vars, spec).filter((id) => fieldOf(t.state, id));
+  if (typeof spec === 'string') return asCardIds(frame.vars, spec);
   return gather(t.state, frame.seat, [spec.each], spec.filter, frame.source);
+}
+
+function dealToIds(
+  t: Transcript,
+  frame: ResolveAbilityFrame,
+  ids: readonly CardId[],
+  amount: number,
+): void {
+  for (const id of ids) {
+    const loc = fieldOf(t.state, id);
+    if (loc) {
+      dealDamage(t, {
+        source: frame.source,
+        target: id,
+        targetSeat: loc.seat,
+        amount,
+        combat: false,
+      });
+      continue;
+    }
+    for (const seat of SEATS) {
+      if (t.state.seats[seat].leader.card === id) {
+        dealDamage(t, {
+          source: frame.source,
+          target: 'leader',
+          targetSeat: seat,
+          amount,
+          combat: false,
+        });
+      }
+    }
+  }
+}
+
+function optionBody(
+  option: Extract<Instr, { op: 'chooseOne' }>['options'][number],
+): readonly Instr[] {
+  const cost = option.cost ?? [];
+  const paid = cost.find(
+    (instr): instr is Extract<Instr, { op: 'select' }> => instr.op === 'select',
+  );
+  if (paid) {
+    return [
+      ...cost,
+      { op: 'if', cond: { atLeast: 1, value: { var: paid.as } }, then: option.effect },
+    ];
+  }
+  return cost.length > 0 ? [...cost, ...option.effect] : option.effect;
 }
 
 function selectPrompt(
@@ -174,6 +230,19 @@ export function runOp(
       const matching = instr.pick.filter
         ? top.filter((id) => matchesFilter(t.state, id, instr.pick.filter, frame.source))
         : top;
+      if (matching.length === 0 || instr.pick.upTo === 0) {
+        if (instr.rest === 'bottom' && top.length > 0) {
+          moveCards(t, {
+            owner: seat,
+            cards: top,
+            from: { zone: 'deck', seat },
+            to: { zone: 'deck', seat },
+            cause: 'look',
+            position: 'bottom',
+          });
+        }
+        return { kind: 'ok', frame: withVars(frame, { look: [] }) };
+      }
       return {
         kind: 'prompt',
         prompt: asSelect(t, {
@@ -196,17 +265,27 @@ export function runOp(
     }
     case 'buryTop': {
       const n = evaluateValue(t.state, seat, instr.n, frame.vars, frame.source);
-      const cards = t.state.seats[seat].deck.slice(0, Math.max(0, n));
-      if (cards.length > 0) {
-        moveCards(t, {
-          owner: seat,
-          cards,
-          from: { zone: 'deck', seat },
-          to: { zone: 'cemetery', seat },
-          cause: 'bury',
-        });
+      const who = instr.who ?? 'you';
+      const seats =
+        who === 'you' ? [seat] : who === 'opponent' ? [opponentOf(seat)] : ([0, 1] as const);
+      const buried: CardId[] = [];
+      for (const target of seats) {
+        const cards = t.state.seats[target].deck.slice(0, Math.max(0, n));
+        if (cards.length > 0) {
+          moveCards(t, {
+            owner: target,
+            cards,
+            from: { zone: 'deck', seat: target },
+            to: { zone: 'cemetery', seat: target },
+            cause: 'bury',
+          });
+          buried.push(...cards);
+        }
       }
-      return { kind: 'ok', frame };
+      return {
+        kind: 'ok',
+        frame: instr.as ? withVars(frame, { [instr.as]: buried }) : frame,
+      };
     }
     case 'discard': {
       const remainingRaw = frame.vars.__discardRemaining;
@@ -269,7 +348,7 @@ export function runOp(
       };
     }
     case 'move': {
-      const cards = asCardIds(frame.vars, instr.cards);
+      const cards = instr.cards === 'self' ? [frame.source] : asCardIds(frame.vars, instr.cards);
       const kept =
         instr.to === 'field' || instr.to === 'ex'
           ? cards.slice(0, roomFor(t, seat, instr.to))
@@ -290,6 +369,9 @@ export function runOp(
           from: from.zone === 'resolution' ? { zone: 'resolution' } : from,
           to,
           cause: instr.to === 'cemetery' ? 'bury' : 'effect',
+          ...(instr.to === 'field'
+            ? { enteredTurn: t.state.turn, placement: 'reserved' as const }
+            : {}),
         });
         if (instr.costDeltaThisTurn) {
           t.emit({
@@ -337,15 +419,7 @@ export function runOp(
           };
         }
         for (const id of targets) {
-          const loc = fieldOf(t.state, id);
-          if (!loc) continue;
-          dealDamage(t, {
-            source: frame.source,
-            target: id,
-            targetSeat: loc.seat,
-            amount,
-            combat: false,
-          });
+          dealToIds(t, frame, [id], amount);
         }
         refreshDerived(t);
         return { kind: 'ok', frame };
@@ -363,28 +437,27 @@ export function runOp(
           },
         };
       }
-      for (const id of targets) {
-        const loc = fieldOf(t.state, id);
-        if (!loc) continue;
-        dealDamage(t, {
-          source: frame.source,
-          target: id,
-          targetSeat: loc.seat,
-          amount,
-          combat: false,
-        });
-      }
+      dealToIds(t, frame, targets, amount);
       refreshDerived(t);
       return { kind: 'ok', frame };
     }
     case 'buff': {
       const cards = resolveCards(t, frame, instr.cards);
       const until = instr.until ?? null;
+      const attack = evaluateValue(t.state, seat, instr.attack, frame.vars, frame.source);
+      const defense = evaluateValue(t.state, seat, instr.defense, frame.vars, frame.source);
       for (const id of cards) {
-        updateFieldCard(t, id, (card) => ({
+        const applied = updateFieldCard(t, id, (card) => ({
           ...card,
-          modifiers: [...card.modifiers, { attack: instr.attack, defense: instr.defense, until }],
+          modifiers: [...card.modifiers, { attack, defense, until }],
         }));
+        if (!applied || attack !== 0 || defense !== 0) {
+          t.emit({
+            type: 'instanceBuffed',
+            card: id,
+            modifier: { attack, defense, until },
+          });
+        }
       }
       refreshDerived(t);
       return { kind: 'ok', frame };
@@ -393,16 +466,26 @@ export function runOp(
       const cards = resolveCards(t, frame, instr.cards);
       const until = instr.until ?? null;
       for (const id of cards) {
-        updateFieldCard(t, id, (card) => ({
+        const grants = instr.keywords.map((keyword) => ({ keyword, until }));
+        const applied = updateFieldCard(t, id, (card) => ({
           ...card,
-          granted: [...card.granted, ...instr.keywords.map((keyword) => ({ keyword, until }))],
+          granted: [...card.granted, ...grants],
         }));
+        if (!applied) {
+          t.emit({ type: 'instanceBuffed', card: id, grants });
+        }
       }
       refreshDerived(t);
       return { kind: 'ok', frame };
     }
     case 'destroy': {
-      for (const id of asCardIds(frame.vars, instr.cards)) {
+      const cards =
+        typeof instr.cards === 'string'
+          ? asCardIds(frame.vars, instr.cards)
+          : gather(t.state, frame.seat, [instr.cards.each], instr.cards.filter, frame.source);
+      for (const id of cards) {
+        if (hasRestriction(t.state, id, (r) => r.cantBeDestroyed === true)) continue;
+        if (wouldBeReplaced(t.state, id, 'destroy')) continue;
         const loc = fieldOf(t.state, id);
         if (!loc) continue;
         const owner = t.state.cards[id]?.owner ?? loc.seat;
@@ -448,11 +531,38 @@ export function runOp(
       return { kind: 'ok', frame };
     }
     case 'engage': {
-      const cards = asCardIds(frame.vars, instr.cards).filter((id) => {
+      const cards = (
+        instr.cards === 'self' ? [frame.source] : asCardIds(frame.vars, instr.cards)
+      ).filter((id) => fieldOf(t.state, id)?.card.placement === 'reserved');
+      const bySeat = new Map<Seat, CardId[]>();
+      for (const id of cards) {
         const loc = fieldOf(t.state, id);
-        return loc?.card.placement === 'reserved';
-      });
-      if (cards.length > 0) engage(t, seat, cards);
+        if (!loc) continue;
+        const list = bySeat.get(loc.seat) ?? [];
+        list.push(id);
+        bySeat.set(loc.seat, list);
+      }
+      for (const [owner, ids] of bySeat) engage(t, owner, ids);
+      return { kind: 'ok', frame };
+    }
+    case 'box': {
+      const cards = instr.cards === 'self' ? [frame.source] : asCardIds(frame.vars, instr.cards);
+      for (const id of cards) {
+        const loc = fieldOf(t.state, id);
+        if (!loc) continue;
+        const untilTurn = t.state.active === loc.seat ? t.state.turn + 2 : t.state.turn + 1;
+        updateFieldCard(t, id, (card) => ({ ...card, boxedUntilTurn: untilTurn }));
+      }
+      refreshDerived(t);
+      return { kind: 'ok', frame };
+    }
+    case 'payPlayPoints': {
+      const n = evaluateValue(t.state, seat, instr.n, frame.vars, frame.source);
+      if (t.state.seats[seat].resources.playPoints < n) {
+        const list = listOf(frame, effect);
+        return { kind: 'ok', frame: { ...frame, pc: list.length } };
+      }
+      payPlayPoints(t, seat, n);
       return { kind: 'ok', frame };
     }
     case 'leaderDefense': {
@@ -491,6 +601,12 @@ export function runOp(
       return { kind: 'ok', frame };
     }
     case 'turnCarrots': {
+      if (instr.cards) {
+        const chosen = asCardIds(frame.vars, instr.cards);
+        if (chosen.length > 0)
+          t.emit({ type: 'carrotsTurned', seat, cards: chosen, faceUp: instr.faceUp });
+        return { kind: 'ok', frame };
+      }
       const carrots = t.state.seats[seat].raceZone
         .filter((link) => link.faceUp !== instr.faceUp)
         .map((link) => link.card);
@@ -521,7 +637,7 @@ export function runOp(
       if (typeof preset === 'number' && instr.options[preset]) {
         return {
           kind: 'ok',
-          frame: spliceBody(frame, effect, instr.options[preset].effect),
+          frame: spliceBody(frame, effect, optionBody(instr.options[preset])),
           advance: false,
         };
       }
@@ -532,6 +648,28 @@ export function runOp(
           seat,
           label: 'Choose one',
           modes: instr.options.map((option, index) => ({ id: String(index), label: option.label })),
+        },
+      };
+    }
+    case 'chooseUpTo': {
+      const usedRaw = frame.vars.__chooseUpTo;
+      const used = Array.isArray(usedRaw)
+        ? usedRaw.filter((value): value is number => typeof value === 'number')
+        : [];
+      const remaining = instr.options
+        .map((option, index) => ({ option, index }))
+        .filter((entry) => !used.includes(entry.index));
+      if (used.length >= instr.n || remaining.length === 0) return { kind: 'ok', frame };
+      return {
+        kind: 'prompt',
+        prompt: {
+          kind: 'chooseMode',
+          seat,
+          label: `Choose up to ${instr.n}`,
+          modes: [
+            ...remaining.map((entry) => ({ id: String(entry.index), label: entry.option.label })),
+            { id: 'stop', label: 'Stop' },
+          ],
         },
       };
     }
@@ -561,6 +699,15 @@ export function runOp(
     case 'lose':
       t.emit({ type: 'gameEnded', outcome: { winner: opponentOf(seat), reason: 'effect' } });
       return { kind: 'ok', frame };
+    case 'forEach': {
+      const cards = asCardIds(frame.vars, instr.cards);
+      const body = cards.flatMap(
+        (id): Instr[] => [{ op: 'bind', as: instr.as, value: [id] }, ...instr.effect] as Instr[],
+      );
+      return { kind: 'ok', frame: spliceBody(frame, effect, body), advance: false };
+    }
+    default:
+      return runFamilyOp(t, frame, instr);
   }
 }
 
@@ -635,7 +782,7 @@ runOp.answer = (
           cause: 'look',
         });
       }
-      if (rest.length > 0) {
+      if (rest.length > 0 && instr.rest === 'bottom') {
         moveCards(t, {
           owner: seat,
           cards: rest,
@@ -710,16 +857,44 @@ runOp.answer = (
       if (!option) return REJECTED;
       return {
         accepted: true,
-        frame: spliceBody(withVars(frame, { __chooseOne: index }), effect, option.effect),
+        frame: spliceBody(withVars(frame, { __chooseOne: index }), effect, optionBody(option)),
+        advance: false,
+      };
+    }
+    case 'chooseUpTo': {
+      if (intent.type !== 'choose' || intent.choice.kind !== 'mode') return REJECTED;
+      if (prompt.kind !== 'chooseMode') return REJECTED;
+      if (intent.choice.id === 'stop') return { accepted: true, frame };
+      const index = Number(intent.choice.id);
+      const option = instr.options[index];
+      if (!option) return REJECTED;
+      const usedRaw = frame.vars.__chooseUpTo;
+      const used = Array.isArray(usedRaw)
+        ? usedRaw.filter((value): value is number => typeof value === 'number')
+        : [];
+      return {
+        accepted: true,
+        frame: spliceBody(withVars(frame, { __chooseUpTo: [...used, index] }), effect, [
+          ...optionBody(option),
+          instr,
+        ]),
         advance: false,
       };
     }
     case 'optional': {
       if (intent.type !== 'choose' || intent.choice.kind !== 'confirm') return REJECTED;
-      const body = intent.choice.yes ? [...instr.cost, ...instr.then] : [];
+      let body: readonly Instr[] = [];
+      if (intent.choice.yes) {
+        const pay = instr.cost.find(
+          (entry): entry is Extract<Instr, { op: 'payPlayPoints' }> => entry.op === 'payPlayPoints',
+        );
+        const n = pay ? evaluateValue(t.state, seat, pay.n, frame.vars, frame.source) : 0;
+        body =
+          pay && t.state.seats[seat].resources.playPoints < n ? [] : [...instr.cost, ...instr.then];
+      }
       return { accepted: true, frame: spliceBody(frame, effect, body), advance: false };
     }
     default:
-      return REJECTED;
+      return answerFamilyOp(t, frame, instr, prompt, intent);
   }
 };

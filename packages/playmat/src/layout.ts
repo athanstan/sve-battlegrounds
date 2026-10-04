@@ -7,7 +7,7 @@ import {
   type ShownStats,
 } from '@sve/rules';
 import type { Camera, Point } from './camera';
-import { CARD, DESIGN, PORTRAIT_RADIUS, RAIL } from './theme';
+import { CARD, DESIGN, LEADER_CARD, RAIL } from './theme';
 
 /**
  * Where everything on the board goes, as a pure function of a view.
@@ -59,6 +59,7 @@ export interface CardSlot {
   /** Field stats the engine currently shows; null off the field. */
   readonly shown: ShownStats | null;
   readonly racedTimes: number;
+  readonly counters: Readonly<Record<string, number>>;
 }
 
 export interface PileSlot {
@@ -73,7 +74,7 @@ export interface AvatarSlot {
   readonly seat: Seat;
   readonly position: Point;
   readonly shield: Point;
-  readonly radius: number;
+  readonly size: { readonly width: number; readonly height: number };
   readonly leader: CardRef;
   readonly defense: number;
   /** It is this seat's turn. */
@@ -152,7 +153,7 @@ const HAND = {
 /** How much a card lies on the table, by zone (see `CardSlot.flat`). */
 const FLAT = { table: 1, hand: 0.3, pile: 0 } as const;
 
-const rest = { engaged: false, evolved: null, shown: null, racedTimes: 0 } as const;
+const rest = { engaged: false, evolved: null, shown: null, racedTimes: 0, counters: {} } as const;
 
 /** Which seat to draw at the near edge: a player's own, or seat 0 for someone watching. */
 export function viewpointOf(view: MatchView): Seat {
@@ -242,6 +243,7 @@ export function computeLayout(view: MatchView, camera: Camera): Layout {
         evolved: link ? { ref: link.card, superEvolved: link.superEvolved } : null,
         shown: entry.shown,
         racedTimes: entry.racedTimes,
+        counters: entry.counters,
       });
     });
 
@@ -331,7 +333,7 @@ export function computeLayout(view: MatchView, camera: Camera): Layout {
       seat,
       position: rail.portrait,
       shield: rail.shield,
-      radius: PORTRAIT_RADIUS,
+      size: { width: LEADER_CARD.width, height: LEADER_CARD.height },
       leader: data.leader.card,
       defense: data.leader.defense,
       active: view.active === seat,

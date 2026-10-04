@@ -134,7 +134,7 @@ export function createMatchRoom(deps: MatchRoomDeps) {
 
         const deck = await gateway.getDeck(token, parsed.data.deckId);
         if (!deck) throw new ServerError(JoinError.deckNotFound, 'That deck was not found');
-        const issues = validateDeck(deck.list, await gateway.catalog());
+        const issues = validateDeck(deck.list, withScriptedFlag(await gateway.catalog()));
         if (issues.length > 0) {
           const why = issues.map((issue) => issue.code).join(', ');
           throw new ServerError(
@@ -225,6 +225,9 @@ export function createMatchRoom(deps: MatchRoomDeps) {
               tokens: Object.fromEntries(tokenMap),
             }),
           );
+          // Opening events start from seq 0; a snapshot still makes the first picture definite
+          // for a client that joined in the same tick the match was created.
+          for (const seated of this.clients) this.#sendSnapshot(seated);
         } catch (error) {
           logError(error);
           throw new ServerError(JoinError.unavailable, 'The match could not be started');

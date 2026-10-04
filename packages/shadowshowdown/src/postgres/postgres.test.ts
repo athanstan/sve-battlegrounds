@@ -29,6 +29,7 @@ const cardRow = (extra: Partial<CardRow> = {}): CardRow => ({
   abilities: null,
   effects: null,
   image: 'BP01-001EN.webp',
+  deck_restriction: null,
   ...extra,
 });
 
@@ -54,6 +55,12 @@ describe('plainText', () => {
     expect(plainText(html)).toBe('On Evolve - Give it [attack]-3 & draw.\nLast Words - Banish it.');
   });
 
+  it('decodes numeric entities used around quoted granted text', () => {
+    expect(plainText('<p>has &#34;[act] [engage]: Draw.&#34;</p>')).toBe(
+      'has "[act] [engage]: Draw."',
+    );
+  });
+
   it('treats the literal placeholder and empty values as no text', () => {
     expect(plainText('None')).toBe('');
     expect(plainText(null)).toBe('');
@@ -72,11 +79,19 @@ describe('field decoding', () => {
   it('keeps only the keywords the engine models', () => {
     expect(keywordsOf(['Last Words', 'Earth Rite', 'On Evolve', 'Drain', 'Drain'])).toEqual([
       'lastWords',
+      'earthRite',
       'onEvolve',
       'drain',
     ]);
     expect(keywordsOf(null)).toEqual([]);
     expect(keywordsOf('Fanfare')).toEqual([]);
+  });
+
+  it('adds Quick when the printed text marks it', () => {
+    expect(
+      toCardDefinition(cardRow({ effects: '<p>[quick]</p><p>Deal 2 damage.</p>' }), mapping)
+        ?.keywords,
+    ).toEqual(['quick']);
   });
 });
 
@@ -84,6 +99,7 @@ describe('toCardDefinition', () => {
   it('maps a follower with art served by the proxy', () => {
     expect(toCardDefinition(cardRow({ abilities: ['Fanfare'] }), mapping)).toMatchObject({
       id: '1',
+      key: 'fairy',
       kind: 'follower',
       special: null,
       cardClass: 'forestcraft',
@@ -96,22 +112,48 @@ describe('toCardDefinition', () => {
     });
   });
 
-  it('keeps evolved cards and tokens, and gives non-followers no stats', () => {
+  it('keys evolved and double-faced printings so they cannot collide', () => {
+    expect(toCardDefinition(cardRow({ sub_type: 'Evolved' }), mapping)?.key).toBe('fairy@evolved');
+    expect(
+      toCardDefinition(
+        cardRow({
+          name: 'Fortuna Regina',
+          sub_type: 'Evolved',
+          original_card_id: 'CP02-SP09aEN',
+        }),
+        mapping,
+      )?.key,
+    ).toBe('fortuna-regina@evolved#a');
+    expect(toCardDefinition(cardRow({ deck_restriction: 10 }), mapping)?.copyLimit).toBe(10);
+  });
+
+  it('keeps evolved cards, tokens and advanced cards, and gives non-followers no stats', () => {
     expect(toCardDefinition(cardRow({ sub_type: 'Evolved' }), mapping)?.special).toBe('evolved');
     expect(toCardDefinition(cardRow({ sub_type: 'Token' }), mapping)?.special).toBe('token');
+    expect(toCardDefinition(cardRow({ sub_type: 'Advanced' }), mapping)?.special).toBe('advanced');
+    expect(toCardDefinition(cardRow({ sub_type: 'Advanced' }), mapping)?.key).toBe(
+      'fairy@advanced',
+    );
     const spell = toCardDefinition(cardRow({ main_type: 'Spell', atk: 0, health: 0 }), mapping);
     expect(spell).toMatchObject({ kind: 'spell', attack: null, defense: null });
   });
 
-  it('leaves out printings the first slice does not model', () => {
-    for (const extra of [
-      { main_type: 'Equipment', sub_type: 'Token' },
-      { main_type: 'Crest', sub_type: 'Token' },
-      { main_type: 'Evolution Point', sub_type: null },
-      { sub_type: 'Advanced' },
-    ]) {
-      expect(toCardDefinition(cardRow(extra), mapping), JSON.stringify(extra)).toBeUndefined();
-    }
+  it('maps Equipment and Crest tokens and leaves Evolution Point out', () => {
+    expect(
+      toCardDefinition(
+        cardRow({ main_type: 'Equipment', sub_type: 'Token', atk: null, health: null }),
+        mapping,
+      ),
+    ).toMatchObject({ kind: 'equipment', special: 'token', attack: null, defense: null });
+    expect(
+      toCardDefinition(
+        cardRow({ main_type: 'Crest', sub_type: 'Token', name: 'Crest: Krulle' }),
+        mapping,
+      ),
+    ).toMatchObject({ kind: 'crest', special: 'token' });
+    expect(
+      toCardDefinition(cardRow({ main_type: 'Evolution Point', sub_type: null }), mapping),
+    ).toBeUndefined();
   });
 });
 
@@ -198,7 +240,7 @@ function fakeDb() {
           ];
         }
         if (text.includes('from cards c join crafts')) {
-          return [cardRow(), cardRow({ id: '2', main_type: 'Equipment', sub_type: 'Token' })];
+          return [cardRow(), cardRow({ id: '2', main_type: 'Evolution Point', sub_type: null })];
         }
         return [];
       })();
@@ -275,7 +317,7 @@ describe('postgres gateway', () => {
     await expect(gateway.listDecks('nope')).rejects.toMatchObject({ code: 'unauthorized' });
   });
 
-  it('builds the catalog once and drops unmodelled printings', async () => {
+  it('builds the catalog once and drops Evolution Point printings', async () => {
     const { db, queries } = fakeDb();
     const gateway = createPostgresGateway({ db });
 

@@ -16,6 +16,9 @@ export interface DesignFit {
  */
 export function useDesignFit(host: RefObject<HTMLElement | null>): DesignFit {
   const [fit, setFit] = useState<DesignFit>({ scale: 1, left: 0, top: 0 });
+  // Re-run when the host element appears. A ref object is stable, so `host.current` going
+  // from null to a node would otherwise leave overlays unmeasured.
+  const node = host.current;
 
   useLayoutEffect(() => {
     const element = host.current;
@@ -33,7 +36,7 @@ export function useDesignFit(host: RefObject<HTMLElement | null>): DesignFit {
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [host]);
+  }, [host, node]);
 
   return fit;
 }

@@ -118,16 +118,39 @@ run `pnpm dev`. Configuration examples are in `apps/server/.env.example` and
 
 ## Develop
 
-| Command           | What it does                                             |
-| ----------------- | -------------------------------------------------------- |
-| `pnpm dev`        | server on :2567 and web app on :5173, both watching      |
-| `pnpm check`      | typecheck, lint and every test                           |
-| `pnpm test`       | all tests (`pnpm test:watch` to iterate)                 |
-| `pnpm build`      | production build of the server and the web app           |
-| `pnpm format`     | Prettier                                                 |
-| `pnpm dump:decks` | refresh the pinned deck fixtures from the shadowrates DB |
+| Command             | What it does                                             |
+| ------------------- | -------------------------------------------------------- |
+| `pnpm dev`          | server on :2567 and web app on :5173, both watching      |
+| `pnpm check`        | typecheck, lint and every test                           |
+| `pnpm test`         | all tests (`pnpm test:watch` to iterate)                 |
+| `pnpm build`        | production build of the server and the web app           |
+| `pnpm format`       | Prettier                                                 |
+| `pnpm dump:cards`   | refresh the card catalog cache from the shadowrates DB   |
+| `pnpm dump:decks`   | refresh the pinned deck fixtures from the shadowrates DB |
+| `pnpm new:card`     | scaffold a card's script from the cached catalog         |
+| `pnpm gen:scripts`  | re-index the script files after adding or moving one     |
+| `pnpm cards:status` | how many catalog cards have a script, per craft          |
 
 Node 22 or newer.
+
+### Card scripts
+
+`packages/cards/fixtures/cards.json` caches **every card** of the shadowrates database (about 3,500
+identities, 6,800 printings), so scripts are written and tested without a database and without any
+deck. Each script is one file, `packages/cards/src/<craft>/<card-name>.ts`, filed by the craft
+printed on the card (`neutral`, `forestcraft`, `swordcraft`, `runecraft`, `dragoncraft`,
+`abysscraft`, `havencraft`) and named after the card, never after a deck or a product.
+
+```sh
+pnpm new:card "Aurelia, Blooming Blade"   # writes swordcraft/aurelia-blooming-blade.ts with the printed text
+pnpm gen:scripts                          # index it
+pnpm cards:status forestcraft             # what is still unscripted
+```
+
+A script holds abilities only: name, key and printed text come from the catalog (`scriptOf`), and
+how many copies a deck plays comes from the deck. Decks (`fixtures/decks.json`) are just printing
+ids and counts. Where decks and cards come from tomorrow (a player's own decks over Google sign-in,
+the shared catalog over `GET /api/v1/cards`) is behind the `ShadowShowdownGateway`; see the roadmap.
 
 ## How it is put together
 

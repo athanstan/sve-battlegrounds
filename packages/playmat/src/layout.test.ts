@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createCamera, DEFAULT_CAMERA } from './camera';
 import { cornersOf } from './scene/quad';
 import { backKey, cardKey, computeLayout, pileKey, viewpointOf } from './layout';
-import { CARD, DESIGN } from './theme';
+import { CARD, DESIGN, LEADER_CARD } from './theme';
 import { atMainPhase, newState, populate, spectatorViewOf, viewOf } from './testing/views';
 
 const camera = createCamera({ ...DEFAULT_CAMERA, viewport: DESIGN });
@@ -207,6 +207,8 @@ describe('computeLayout', () => {
       layout.avatars.find((a) => a.seat === 0),
     ];
     expect(far?.position.y).toBeLessThan(near?.position.y ?? 0);
+    expect(far?.size).toEqual({ width: LEADER_CARD.width, height: LEADER_CARD.height });
+    expect(near?.size).toEqual({ width: LEADER_CARD.width, height: LEADER_CARD.height });
   });
 
   it('keeps the evolve deck alone on the left, and the deck on the right with the cemetery and banished above it', () => {

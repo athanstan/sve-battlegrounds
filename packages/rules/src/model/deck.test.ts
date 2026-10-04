@@ -39,6 +39,21 @@ describe('validateDeck (CR 6.1)', () => {
     );
   });
 
+  it('honours a printing that raises the copy cap', () => {
+    const deck = legalDeck();
+    const first = deck.main[0]!.card;
+    const catalog: CardCatalog = (id) => {
+      const base = testCatalog(id);
+      if (!base || id !== first) return base;
+      return { ...base, copyLimit: 10 } satisfies CardDefinition;
+    };
+    const issues = validateDeck(
+      { ...deck, main: [{ card: first, count: 10 }, ...deck.main.slice(1)] },
+      catalog,
+    );
+    expect(issues.map((issue) => issue.code)).not.toContain('tooManyCopies');
+  });
+
   it('allows the evolved copy to share its base card name', () => {
     // Test Follower 0 appears three times in main and once evolved: separate decks, separate caps.
     expect(validateDeck(legalDeck(), testCatalog)).toEqual([]);

@@ -7,7 +7,9 @@ import type {
   Duration,
   FieldCard,
   GameOverReason,
+  GrantedKeyword,
   MainOption,
+  Modifier,
   Outcome,
   Phase,
   Placement,
@@ -166,6 +168,7 @@ export type EngineEvent =
       readonly sourceDef: CardDefId;
       readonly abilityKey: string;
       readonly triggerSeq: number;
+      readonly vars?: Readonly<Record<string, unknown>>;
     }
   | { readonly type: 'abilityResolved'; readonly id: number }
   | { readonly type: 'abilityDropped'; readonly id: number }
@@ -190,11 +193,23 @@ export type EngineEvent =
   | { readonly type: 'workUpdated'; readonly frame: WorkFrame }
   | { readonly type: 'flagsChanged'; readonly seat: Seat; readonly flags: TurnFlags }
   | {
+      readonly type: 'instanceBuffed';
+      readonly card: CardId;
+      readonly modifier?: Modifier;
+      readonly grants?: readonly GrantedKeyword[];
+    }
+  | {
       readonly type: 'costDeltaApplied';
       readonly card: CardId;
       readonly amount: number;
       readonly until: Duration;
-    };
+    }
+  | { readonly type: 'extraTurnQueued'; readonly seat: Seat }
+  | { readonly type: 'turnSkipped'; readonly seat: Seat }
+  | { readonly type: 'dieRolled'; readonly seat: Seat; readonly value: number; readonly sides: number }
+  | { readonly type: 'numberDeclared'; readonly seat: Seat; readonly value: number }
+  | { readonly type: 'nameDeclared'; readonly seat: Seat; readonly value: string }
+  | { readonly type: 'cantLoseChanged'; readonly seats: readonly Seat[] };
 
 export interface GameStartSeat {
   readonly evolutionPoints: number;

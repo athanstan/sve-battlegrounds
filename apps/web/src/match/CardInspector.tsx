@@ -9,6 +9,8 @@ const KIND: Readonly<Record<CardDefinition['kind'], string>> = {
   follower: 'Follower',
   spell: 'Spell',
   amulet: 'Amulet',
+  equipment: 'Equipment',
+  crest: 'Crest',
 };
 
 interface Props {

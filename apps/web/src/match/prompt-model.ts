@@ -46,6 +46,20 @@ export type PromptUi =
       readonly total: number;
       readonly targets: readonly CardId[];
     }
+  | {
+      readonly kind: 'number';
+      readonly promptId: number;
+      readonly title: string;
+      readonly min: number;
+      readonly max: number;
+      readonly intent: (value: number) => Intent;
+    }
+  | {
+      readonly kind: 'text';
+      readonly promptId: number;
+      readonly title: string;
+      readonly intent: (value: string) => Intent;
+    }
   | { readonly kind: 'pass'; readonly promptId: number };
 
 /** The question put to this viewer, if there is one. Spectators and the waiting seat get none. */
@@ -216,6 +230,39 @@ export function promptUi(view: MatchView): PromptUi | null {
           intent: choose(prompt.id, { kind: 'orderPending', id: entry.id }),
         })),
       };
+    case 'chooseNumber':
+      return {
+        kind: 'number',
+        promptId: prompt.id,
+        title: prompt.label,
+        min: prompt.min,
+        max: prompt.max,
+        intent: (value) => choose(prompt.id, { kind: 'number', value }),
+      };
+    case 'declareName':
+      return {
+        kind: 'text',
+        promptId: prompt.id,
+        title: prompt.label,
+        intent: (value) => choose(prompt.id, { kind: 'name', value }),
+      };
+    case 'orderCards':
+      return {
+        kind: 'pick',
+        promptId: prompt.id,
+        title: prompt.label,
+        spec: {
+          candidates: prompt.candidates,
+          min: prompt.candidates.length,
+          max: prompt.candidates.length,
+        },
+        confirmLabel: (picked) =>
+          picked === prompt.candidates.length
+            ? 'Confirm order'
+            : `Pick ${prompt.candidates.length - picked} more`,
+        canConfirm: (picked) => picked === prompt.candidates.length,
+        intent: (cards) => choose(prompt.id, { kind: 'order', cards }),
+      };
   }
 }
 
@@ -260,5 +307,11 @@ export function waitingLabel(
     case 'allocate':
     case 'orderPending':
       return `${who} is choosing`;
+    case 'chooseNumber':
+      return `${who} is choosing a number`;
+    case 'declareName':
+      return `${who} is declaring a name`;
+    case 'orderCards':
+      return `${who} is ordering cards`;
   }
 }

@@ -17,6 +17,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "new:card": "tsx scripts/new-card-script.ts",
+    "cards:status": "tsx scripts/card-status.ts",
+    "cards:atoms": "tsx scripts/card-atoms.ts",
+    "gen:scripts": "tsx scripts/gen-script-index.ts",
+    "dump:cards": "tsx --env-file-if-exists=.env scripts/dump-card-catalog.ts",
     "dump:decks": "tsx --env-file-if-exists=.env scripts/dump-deck-fixture.ts"
   },
   "devDependencies": {

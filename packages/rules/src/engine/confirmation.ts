@@ -5,6 +5,7 @@ import { definitionOf, effectiveDefinition } from '../state/state';
 import type { Transcript } from './transcript';
 import { moveCards } from './move';
 import { hasShownKeyword, refreshDerived } from './derived';
+import { hasRestriction, wouldBeReplaced } from '../abilities/statics';
 import { isSelection } from './queries';
 import { popWork, pushWork } from './stack';
 import { scanStateTriggers } from '../abilities/triggers';
@@ -19,8 +20,8 @@ type RuleHandler = (state: MatchState) => readonly EngineEvent[];
 
 const lostBy = (state: MatchState, seat: Seat): GameOverReason | null => {
   const player = state.seats[seat];
-  if (player.leader.defense <= 0) return 'leaderDefeated'; // 11.2.1
-  if (player.drewFromEmptyDeck) return 'deckOut'; // 11.2.2
+  if (player.leader.defense <= 0 && !state.cantLose.includes(seat)) return 'leaderDefeated';
+  if (player.drewFromEmptyDeck) return 'deckOut';
   return null;
 };
 
@@ -62,6 +63,8 @@ function handleFollowerDestruction(state: MatchState): readonly EngineEvent[] {
       const def = effectiveDefinition(state, card.id);
       if (def.kind !== 'follower') continue;
       if (card.shown.defense > 0) continue;
+      if (hasRestriction(state, card.id, (r) => r.cantBeDestroyed === true)) continue;
+      if (wouldBeReplaced(state, card.id, 'destroy')) continue;
       events.push({
         type: 'cardsMoved',
         owner: seat,
@@ -217,7 +220,7 @@ function playPending(t: Transcript, pending: PendingAbility): void {
     sourceDef: pending.sourceDef,
     abilityKey: pending.abilityKey,
     pc: 0,
-    vars: {},
+    vars: pending.vars ?? {},
     pendingId: pending.id,
     queue,
   });
@@ -280,6 +283,7 @@ export function tickConfirmation(t: Transcript): PromptRequest | null {
     if (overflow) return overflow;
 
     const active = t.state.active;
+    // APNAP: the active player answers first, then the opponent (10.5.2).
     const seats: Seat[] = active !== null ? [active, opponentOf(active)] : [0, 1];
     for (const seat of seats) {
       const pool = pendingFor(t.state, seat);

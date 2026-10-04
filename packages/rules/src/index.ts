@@ -9,7 +9,9 @@
 export {
   CARD_CLASSES,
   KEYWORDS,
+  cardKey,
   hasKeyword,
+  keywordsFromText,
   type CardCatalog,
   type CardClass,
   type CardDefinition,
@@ -42,6 +44,7 @@ export {
   definitionOf,
   effectiveDefinition,
   fieldCard,
+  isBoxed,
   refOf,
   type MatchState,
   type Outcome,
@@ -65,6 +68,19 @@ export type { CardScript, Ability, Instr, CardFilter } from './abilities/spec';
 export { scriptKey } from './abilities/spec';
 export { textHash, parseEvolveCost, parseServeCost } from './abilities/generic';
 export { DEFAULT_TOKENS } from './abilities/tokens';
+export {
+  overflow,
+  sanguine,
+  combo,
+  necrocharge,
+  spellchain,
+  earthRite,
+  lesson,
+  fuseCost,
+  onDrive,
+  onRace,
+  onUnionBurst,
+} from './abilities/modules';
 export type { DrawCause, EngineEvent, EngineEventType, LoggedEvent } from './events/events';
 export { replay, applyEvent, stateFromCreation } from './events/apply';
 export type { Action, Choice, Intent, IntentType, RejectionReason } from './actions/intents';

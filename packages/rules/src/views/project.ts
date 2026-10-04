@@ -33,6 +33,8 @@ function projectSeat(state: MatchState, seat: Seat, viewer: Viewer): SeatView {
       enteredTurn: fieldCard.enteredTurn,
       shown: fieldCard.shown,
       racedTimes: fieldCard.racedTimes,
+      counters: fieldCard.counters,
+      equipped: refs(state, fieldCard.equipped),
     })),
     ex: refs(state, s.ex),
     cemetery: refs(state, s.cemetery),

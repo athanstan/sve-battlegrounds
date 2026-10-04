@@ -1,6 +1,6 @@
 import type { CardScript } from '../abilities/spec';
 import { textHash } from '../abilities/generic';
-import { assertNever, type CardDefId, type CardId } from '../model/ids';
+import { assertNever, opponentOf, type CardDefId, type CardId } from '../model/ids';
 import { STARTING_LIMITS } from '../model/limits';
 import type { CardDefinition } from '../model/cards';
 import { seedRng } from '../rng';
@@ -10,6 +10,7 @@ import {
   fieldCard,
   type CardInstance,
   type CostDelta,
+  type Duration,
   type FieldCard,
   type MatchState,
   type Placement,
@@ -57,7 +58,7 @@ export function stateFromCreation(event: MatchCreated): MatchState {
   const scripts: Record<CardDefId, CardScript> = {};
   const pin = (def: (typeof event.defs)[number]) => {
     const script = event.scripts.find(
-      (entry) => entry.name === def.name && entry.textHash === textHash(def.text),
+      (entry) => entry.key === def.key && entry.textHash === textHash(def.text),
     );
     if (script) scripts[def.id] = script;
   };
@@ -100,6 +101,11 @@ export function stateFromCreation(event: MatchCreated): MatchState {
     nextTokenSeq: 1,
     combats: [],
     outcome: null,
+    extraTurns: 0,
+    skipTurns: [0, 0],
+    cantLose: [],
+    nextContinuousId: 1,
+    eventLog: [],
     seq: 1,
   };
 }
@@ -169,7 +175,14 @@ function putInto(
       case 'field': {
         const placement = event.placement ?? 'reserved';
         const enteredTurn = event.enteredTurn ?? state.turn;
-        const added = cards.map((id) => fieldCard(id, placement, enteredTurn));
+        const added = cards.map((id) => {
+          const inst = state.cards[id];
+          return {
+            ...fieldCard(id, placement, enteredTurn),
+            modifiers: inst?.modifiers ?? [],
+            granted: inst?.granted ?? [],
+          };
+        });
         return { ...seat, field: [...seat.field, ...added] };
       }
       case 'ex':
@@ -290,9 +303,31 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
         state,
       );
 
-    case 'turnStarted':
+    case 'turnStarted': {
+      const cards = Object.fromEntries(
+        Object.entries(state.cards).map(([id, card]) => [
+          id,
+          card.damagedThisTurnBy?.length ? { ...card, damagedThisTurnBy: [] } : card,
+        ]),
+      );
+      let extraTurns = state.extraTurns;
+      const skipTurns = [...state.skipTurns] as [number, number];
+      if (extraTurns > 0 && state.active === event.seat) extraTurns -= 1;
+      else if (state.active !== null) {
+        const passed = opponentOf(state.active);
+        if (passed !== event.seat && skipTurns[passed] > 0) skipTurns[passed] -= 1;
+      }
       return updateSeat(
-        { ...state, turn: event.turn, active: event.seat, phase: null, combats: [] },
+        {
+          ...state,
+          cards,
+          turn: event.turn,
+          active: event.seat,
+          phase: null,
+          combats: [],
+          extraTurns,
+          skipTurns,
+        },
         event.seat,
         (seat) => ({
           ...seat,
@@ -301,6 +336,7 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
           field: seat.field.map((card) => ({ ...card, damagedThisTurnBy: [], racedTimes: 0 })),
         }),
       );
+    }
 
     case 'phaseStarted':
       return { ...state, phase: event.phase };
@@ -337,8 +373,44 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
       return updateSeat(state, event.seat, (seat) => ({ ...seat, drewFromEmptyDeck: true }));
 
     case 'cardsMoved': {
-      const taken = takeFrom(state, event.from, event.cards);
-      const put = putInto(taken, event);
+      let current = state;
+      if (event.from.zone === 'field') {
+        const cards = { ...current.cards };
+        for (const id of event.cards) {
+          const field = current.seats[event.from.seat].field.find((entry) => entry.id === id);
+          const inst = cards[id];
+          if (!inst || !field) continue;
+          cards[id] = {
+            ...inst,
+            lastKnown: {
+              zone: event.from.zone,
+              seat: event.from.seat,
+              attack: field.shown.attack,
+              defense: field.shown.defense,
+              keywords: field.shown.keywords,
+            },
+          };
+        }
+        current = { ...current, cards };
+      }
+      const taken = takeFrom(current, event.from, event.cards);
+      let put = putInto(taken, event);
+      if (event.to.zone === 'field') {
+        const cards = { ...put.cards };
+        for (const id of event.cards) {
+          const inst = cards[id];
+          if (inst && (inst.modifiers?.length || inst.granted?.length)) {
+            cards[id] = {
+              id: inst.id,
+              def: inst.def,
+              owner: inst.owner,
+              token: inst.token,
+              ...(inst.damagedThisTurnBy ? { damagedThisTurnBy: inst.damagedThisTurnBy } : {}),
+            };
+          }
+        }
+        put = { ...put, cards };
+      }
       return clearCostDeltas(put, event.cards, event.from, event.to);
     }
 
@@ -351,24 +423,47 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
         field: seat.field.map((card) => (card.id === event.card ? event.field : card)),
       }));
 
-    case 'leaderDefenseChanged':
+    case 'leaderDefenseChanged': {
+      const previous = state.seats[event.seat].leader.defense;
+      const lost = event.defense < previous ? previous - event.defense : 0;
       return updateSeat(state, event.seat, (seat) => ({
         ...seat,
         leader: { ...seat.leader, defense: event.defense },
+        flags: {
+          ...seat.flags,
+          leaderLostDefense: seat.flags.leaderLostDefense + lost,
+        },
       }));
+    }
 
     case 'durationsEnded': {
       // 7.4.8: "until end of turn" / "during this turn" leaves every card; "during your turn"
       // and "start of your next turn" only leave the named seat's cards.
       const both = event.until === 'endOfTurn';
+      const stripMods = <T extends { until: Duration | null }>(list: readonly T[] | undefined) =>
+        (list ?? []).filter((entry) => entry.until !== event.until);
       const strip = (seat: SeatState): SeatState => ({
         ...seat,
         field: seat.field.map((card) => ({
           ...card,
           modifiers: card.modifiers.filter((mod) => mod.until !== event.until),
           granted: card.granted.filter((grant) => grant.until !== event.until),
+          grantedAbilities: card.grantedAbilities.filter((grant) => grant.until !== event.until),
         })),
       });
+      const cards = Object.fromEntries(
+        Object.entries(state.cards).map(([id, card]) => {
+          if (!both && card.owner !== event.seat) return [id, card];
+          return [
+            id,
+            {
+              ...card,
+              modifiers: stripMods(card.modifiers),
+              granted: stripMods(card.granted),
+            },
+          ];
+        }),
+      );
       const costDeltas = Object.fromEntries(
         Object.entries(state.costDeltas).flatMap(([id, deltas]) => {
           const kept = deltas.filter((delta) => delta.until !== event.until);
@@ -376,9 +471,14 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
         }),
       );
       if (both) {
-        return { ...state, costDeltas, seats: [strip(state.seats[0]), strip(state.seats[1])] };
+        return {
+          ...state,
+          cards,
+          costDeltas,
+          seats: [strip(state.seats[0]), strip(state.seats[1])],
+        };
       }
-      return updateSeat({ ...state, costDeltas }, event.seat, strip);
+      return updateSeat({ ...state, cards, costDeltas }, event.seat, strip);
     }
 
     case 'cardPlayed':
@@ -391,6 +491,7 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
             state.defs[state.cards[event.card]?.def ?? ('' as CardDefId)]?.kind === 'spell'
               ? seat.flags.spellsPlayed + 1
               : seat.flags.spellsPlayed,
+          playedThisTurn: [...seat.flags.playedThisTurn, event.card],
         },
       }));
 
@@ -472,7 +573,21 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
       }
       const target = event.target;
       const source = event.source;
-      return updateSeat(state, event.targetSeat, (seat) => ({
+      const instance = state.cards[target];
+      const withMemory =
+        source && instance
+          ? {
+              ...state,
+              cards: {
+                ...state.cards,
+                [target]: {
+                  ...instance,
+                  damagedThisTurnBy: [...(instance.damagedThisTurnBy ?? []), source],
+                },
+              },
+            }
+          : state;
+      return updateSeat(withMemory, event.targetSeat, (seat) => ({
         ...seat,
         field: seat.field.map((card) => {
           if (card.id !== target) return card;
@@ -506,6 +621,7 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
             sourceDef: event.sourceDef,
             abilityKey: event.abilityKey,
             triggerSeq: event.triggerSeq,
+            ...(event.vars ? { vars: event.vars } : {}),
           },
         ],
         nextPendingId: Math.max(state.nextPendingId, event.id + 1),
@@ -587,6 +703,44 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
       };
     }
 
+    case 'instanceBuffed': {
+      const inst = state.cards[event.card];
+      if (!inst) return state;
+      const onField = state.seats.some((seat) => seat.field.some((card) => card.id === event.card));
+      if (onField) return state;
+      return {
+        ...state,
+        cards: {
+          ...state.cards,
+          [event.card]: {
+            ...inst,
+            ...(event.modifier ? { modifiers: [...(inst.modifiers ?? []), event.modifier] } : {}),
+            ...(event.grants ? { granted: [...(inst.granted ?? []), ...event.grants] } : {}),
+          },
+        },
+      };
+    }
+
+    case 'extraTurnQueued':
+      return { ...state, extraTurns: state.extraTurns + 1 };
+
+    case 'turnSkipped':
+      return {
+        ...state,
+        skipTurns: state.skipTurns.map((n, seat) => (seat === event.seat ? n + 1 : n)) as [
+          number,
+          number,
+        ],
+      };
+
+    case 'dieRolled':
+    case 'numberDeclared':
+    case 'nameDeclared':
+      return state;
+
+    case 'cantLoseChanged':
+      return { ...state, cantLose: event.seats };
+
     default:
       return assertNever(event);
   }
@@ -595,7 +749,9 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
 /** Apply one event. Total over `EngineEvent`; every application advances `seq` by exactly one. */
 export function applyEvent(state: MatchState, event: EngineEvent): MatchState {
   const next = apply(state, event);
-  return { ...next, seq: state.seq + 1 };
+  const eventLog =
+    event.type === 'turnStarted' ? [event.type] : [...state.eventLog, event.type].slice(-80);
+  return { ...next, eventLog, seq: state.seq + 1 };
 }
 
 /** Rebuild a match from its stored event log (replays, crash recovery). */

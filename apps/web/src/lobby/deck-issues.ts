@@ -16,7 +16,7 @@ export function describeDeckIssue(issue: DeckIssue): string {
     case 'notMainDeckCard':
       return `Main deck contains a card that cannot be there (${issue.reason}).`;
     case 'notEvolveDeckCard':
-      return 'Only evolved followers can be in the evolve deck.';
+      return 'Only evolved or advanced cards can be in the evolve deck.';
     case 'tooManyCopies':
       return `${issue.count} copies of ${issue.name}; the limit is ${issue.limit}.`;
     case 'wrongClass':

@@ -157,6 +157,29 @@ function randomAnswer(prompt: Prompt, n: number): Action {
           choice: { kind: 'orderPending', id: prompt.pending[0]?.id ?? 0 },
         },
       };
+    case 'chooseNumber':
+      return {
+        seat,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'number', value: prompt.min },
+        },
+      };
+    case 'declareName':
+      return {
+        seat,
+        intent: { type: 'choose', promptId: prompt.id, choice: { kind: 'name', value: '' } },
+      };
+    case 'orderCards':
+      return {
+        seat,
+        intent: {
+          type: 'choose',
+          promptId: prompt.id,
+          choice: { kind: 'order', cards: prompt.candidates },
+        },
+      };
   }
 }
 

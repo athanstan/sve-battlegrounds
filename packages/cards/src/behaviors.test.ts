@@ -1,15 +1,20 @@
-import { createMatch, reduce, type MatchState, type Prompt } from '@sve/rules';
 import { describe, expect, it } from 'vitest';
 import { fairyCircle } from './forestcraft/fairy-circle';
 import { feyboltArcher } from './forestcraft/feybolt-archer';
-import { sevenMoreCentimeters } from './umamusume/seven-more-centimeters';
-import { trialInitiation } from './umamusume/trial-initiation';
-import { spinaria } from './forestcraft/spinaria';
-import { chevalGrandEvolved } from './umamusume/cheval-grand';
-import { daiwaScarlet } from './umamusume/daiwa-scarlet';
-import { piercye } from './forestcraft/piercye';
-import { deckListOf, fixtureCatalog } from './fixture-data';
-import { scriptFor } from './registry';
+import { sevenMoreCentimeters } from './abysscraft/7-more-centimeters';
+import { trialInitiation } from './swordcraft/trial-initiation';
+import { chevalGrandEvolved } from './runecraft/cheval-grand';
+import { daiwaScarlet } from './runecraft/daiwa-scarlet';
+import { piercyeQueenOfFrost } from './forestcraft/piercye-queen-of-frost';
+import { piousFlameHeavensScorcher } from './dragoncraft/pious-flame-heavens-scorcher';
+import { titaniaSSanctuary } from './forestcraft/titania-s-sanctuary';
+import { aSuperSuccessfulEvent } from './neutral/a-super-successful-event';
+import { nahtnaughtCursedQueen } from './swordcraft/nahtnaught-cursed-queen';
+import { tyrantSOrder } from './swordcraft/tyrant-s-order';
+import { unbridledFury } from './swordcraft/unbridled-fury';
+import { deckListOf, fixtureCatalog, uniqueFixtureCards } from './fixture-data';
+import { ALL_SCRIPTS, scriptFor } from './registry';
+import { createMatch, reduce, type MatchState, type Prompt } from '@sve/rules';
 
 const start = (seed: string) =>
   createMatch({
@@ -63,22 +68,33 @@ function toMain(seed: string): MatchState {
 }
 
 describe('per-card behaviour', () => {
-  it('scripts Fairy Circle as a token-to-EX spell', () => {
+  it('has a script for every unique live key', () => {
+    const keys = new Set(ALL_SCRIPTS.map((script) => script.key));
+    expect([...ALL_SCRIPTS.map((script) => script.key)].sort()).toEqual([...keys].sort());
+    expect(
+      uniqueFixtureCards()
+        .map((card) => card.key)
+        .filter((key) => !keys.has(key)),
+    ).toEqual([]);
+  });
+
+  it('scripts Fairy Circle as three Fairies to EX', () => {
     expect(fairyCircle.abilities).toEqual([
-      { kind: 'spell', key: 'spell', effect: [{ op: 'token', name: 'Fairy', n: 2, to: 'ex' }] },
+      { kind: 'spell', key: 'spell', effect: [{ op: 'token', name: 'Fairy', n: 3, to: 'ex' }] },
     ]);
   });
 
-  it('scripts Feybolt Archer as look-top-3 after a Fairy token', () => {
+  it('scripts Feybolt Archer as a Fairy plus look-top-3', () => {
     const fanfare = feyboltArcher.abilities.find((ability) => ability.kind === 'triggered');
     expect(fanfare).toMatchObject({ on: 'fanfare' });
     expect(fanfare?.kind === 'triggered' ? fanfare.effect[1] : undefined).toMatchObject({
       op: 'lookTop',
       n: 3,
+      rest: 'bottom',
     });
   });
 
-  it('scripts Daiwa Scarlet as a filtered deck search', () => {
+  it('scripts Daiwa Scarlet as a filtered deck search and a first-spell discount', () => {
     const fanfare = daiwaScarlet.abilities.find(
       (ability) => ability.kind === 'triggered' && ability.key === 'fanfare',
     );
@@ -87,18 +103,37 @@ describe('per-card behaviour', () => {
     });
   });
 
-  it('scripts Aria evolved, Piercye, Spinaria, C.C., Trial Initiation, Cheval Grand, and 7 More Centimeters', () => {
-    expect(piercye.abilities[0]).toMatchObject({ effect: [{ op: 'evolveSelf' }] });
-    expect(spinaria.abilities[0]).toMatchObject({
-      effect: [{ op: 'select' }, { op: 'move', to: 'ex', costDeltaThisTurn: -2 }],
-    });
+  it("scripts Titania's Sanctuary, Piercye, Trial Initiation, Cheval Grand, Pious Flame, and 7 More Centimeters", () => {
+    expect(titaniaSSanctuary.abilities.some((ability) => ability.kind === 'static')).toBe(true);
+    expect(piercyeQueenOfFrost.abilities[0]).toMatchObject({ on: 'fanfare' });
     expect(trialInitiation.abilities[0]).toMatchObject({ kind: 'spell' });
     expect(
       chevalGrandEvolved.abilities.some(
         (ability) => ability.kind === 'triggered' && ability.perTurn === 2,
       ),
     ).toBe(true);
+    expect(piousFlameHeavensScorcher.abilities[0]).toMatchObject({
+      kind: 'spell',
+      extraCost: { reduceBy: 2 },
+    });
     expect(sevenMoreCentimeters.abilities[0]).toMatchObject({ kind: 'static' });
+  });
+
+  it('scripts evolved Carrot spells with a 10-copy limit', () => {
+    expect(aSuperSuccessfulEvent.alsoNamed).toEqual(['Carrot']);
+    expect(aSuperSuccessfulEvent.copyLimit).toBe(10);
+  });
+
+  it("scripts Nahtnaught, Tyrant's Order, and Unbridled Fury", () => {
+    expect(nahtnaughtCursedQueen.abilities).toMatchObject([
+      { kind: 'triggered', on: 'fanfare' },
+      { kind: 'activated', perTurn: 1 },
+    ]);
+    expect(tyrantSOrder.abilities[0]).toMatchObject({
+      kind: 'spell',
+      effect: [{ op: 'select', filter: { boxed: true } }, { op: 'destroy' }, { op: 'search' }],
+    });
+    expect(unbridledFury.abilities[0]).toMatchObject({ kind: 'spell' });
   });
 
   it('does not offer 7 More Centimeters on turn 1', () => {

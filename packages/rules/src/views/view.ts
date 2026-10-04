@@ -30,6 +30,8 @@ export interface FieldCardView {
   readonly enteredTurn: number;
   readonly shown: ShownStats;
   readonly racedTimes: number;
+  readonly counters: Readonly<Record<string, number>>;
+  readonly equipped: readonly CardRef[];
 }
 
 export interface EvolveLinkView {

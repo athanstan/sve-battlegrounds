@@ -88,34 +88,35 @@ export interface RailAnchors {
 /** Where the right rail sits: clear of the hourglass (bottom right) and the chat buttons (top right). */
 const RIGHT_RAIL_X = 1360;
 
+/** Leader card on the rail, a little smaller than a field card so the orbs and name still fit. */
+export const LEADER_CARD = { width: 100, height: 140 } as const;
+
 export const RAIL = {
   far: {
-    portrait: { x: 118, y: 130 },
-    shield: { x: 168, y: 178 },
-    evolve: { x: 262, y: 110 },
+    portrait: { x: 128, y: 148 },
+    shield: { x: 168, y: 206 },
+    evolve: { x: 268, y: 118 },
     deck: { x: RIGHT_RAIL_X, y: 100 },
     cemetery: { x: RIGHT_RAIL_X, y: 240 },
     banished: { x: RIGHT_RAIL_X, y: 360 },
-    orbs: { x: 60, y: 276 },
+    orbs: { x: 64, y: 292 },
   },
   near: {
-    portrait: { x: 118, y: 770 },
-    shield: { x: 168, y: 818 },
-    evolve: { x: 262, y: 790 },
+    portrait: { x: 128, y: 748 },
+    shield: { x: 168, y: 806 },
+    evolve: { x: 268, y: 788 },
     deck: { x: RIGHT_RAIL_X, y: 800 },
     cemetery: { x: RIGHT_RAIL_X, y: 660 },
     banished: { x: RIGHT_RAIL_X, y: 540 },
-    orbs: { x: 60, y: 566 },
+    orbs: { x: 64, y: 540 },
   },
 } as const satisfies Record<'far' | 'near', RailAnchors>;
 
-export const PORTRAIT_RADIUS = 54;
-
 /**
- * Where the chrome centres each player's name, in design space: just clear of the portrait, on
+ * Where the chrome centres each player's name, in design space: just clear of the leader card, on
  * the outer side (above the opponent's, below the local player's).
  */
 export const NAMEPLATE = {
-  far: { x: RAIL.far.portrait.x, y: RAIL.far.portrait.y - PORTRAIT_RADIUS - 24 },
-  near: { x: RAIL.near.portrait.x, y: RAIL.near.portrait.y + PORTRAIT_RADIUS + 40 },
+  far: { x: RAIL.far.portrait.x, y: RAIL.far.portrait.y - LEADER_CARD.height / 2 - 18 },
+  near: { x: RAIL.near.portrait.x, y: RAIL.near.portrait.y + LEADER_CARD.height / 2 + 22 },
 } as const;
