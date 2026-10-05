@@ -252,6 +252,12 @@ function LiveMatch({ session }: { session: MatchSession }) {
         ?.shown ??
       view.seats.flatMap((s) => s.ex).find((entry) => entry.card.id === inspected.ref.id)?.shown)
     : undefined;
+  const inspectedPlay = inspected
+    ? options.find(
+        (option): option is Extract<MainOption, { type: 'play' }> =>
+          option.type === 'play' && option.card === inspected.ref.id,
+      )
+    : undefined;
 
   const nameplate = (which: Seat, anchor: { x: number; y: number }) => (
     <div
@@ -508,6 +514,7 @@ function LiveMatch({ session }: { session: MatchSession }) {
         <CardInspector
           def={inspectedDef}
           shown={inspectedShown}
+          playCost={inspectedPlay?.cost}
           side={inspected.side}
           onClose={closeInspector}
           onPointerEnter={cancelClosing}

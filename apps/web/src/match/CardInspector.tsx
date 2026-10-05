@@ -17,6 +17,8 @@ interface Props {
   readonly def: CardDefinition;
   /** What the card is right now on the field, when that differs from what is printed. */
   readonly shown?: { readonly attack: number; readonly defense: number } | undefined;
+  /** What it costs to play right now, when a play option is on the table. */
+  readonly playCost?: number | undefined;
   /** Which edge it sits on; the table puts it opposite the card being read. */
   readonly side: 'left' | 'right';
   readonly onClose: () => void;
@@ -48,6 +50,7 @@ function Run({ run }: { run: TextRun }) {
 export function CardInspector({
   def,
   shown,
+  playCost,
   side,
   onClose,
   onPointerEnter,
@@ -58,6 +61,8 @@ export function CardInspector({
   const isFollower = def.kind === 'follower';
   const attack = shown?.attack ?? def.attack;
   const defense = shown?.defense ?? def.defense;
+  const costNow = playCost ?? def.cost;
+  const discounted = playCost !== undefined && playCost < def.cost;
   const kind = [
     def.special === 'token' ? 'Token' : null,
     def.special === 'evolved' ? 'Evolved' : null,
@@ -108,7 +113,16 @@ export function CardInspector({
           <div className="text-parchment">{kind}</div>
           {def.kind !== 'leader' ? (
             <div className="text-mist">
-              Cost <span className="font-semibold text-gold-bright">{def.cost}</span>
+              Cost{' '}
+              <span
+                className={`font-semibold ${discounted ? '' : 'text-gold-bright'}`}
+                style={discounted ? { color: '#6adf7a' } : undefined}
+              >
+                {costNow}
+              </span>
+              {playCost !== undefined && playCost !== def.cost ? (
+                <span className="ml-1 text-xs">(printed {def.cost})</span>
+              ) : null}
             </div>
           ) : null}
           {isFollower && attack !== null && defense !== null ? (
