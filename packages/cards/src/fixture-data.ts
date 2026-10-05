@@ -58,10 +58,12 @@ export function deckListOf(deckId: string): DeckList {
   return {
     leader: leader.id,
     main: deck.cards
-      .filter((card) => card.kind !== 'leader' && card.special !== 'evolved')
+      .filter(
+        (card) => card.kind !== 'leader' && card.special !== 'evolved' && card.special !== 'advanced',
+      )
       .map((card) => ({ card: card.id, count: card.count })),
     evolve: deck.cards
-      .filter((card) => card.special === 'evolved')
+      .filter((card) => card.special === 'evolved' || card.special === 'advanced')
       .map((card) => ({ card: card.id, count: card.count })),
   };
 }
