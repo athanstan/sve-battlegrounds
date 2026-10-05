@@ -1,10 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { Action } from '../actions/intents';
 import { replay } from '../events/apply';
-import { asCardId, opponentOf, type CardDefId, type CardId, type Seat } from '../model/ids';
+import {
+  asCardDefId,
+  asCardId,
+  opponentOf,
+  type CardDefId,
+  type CardId,
+  type Seat,
+} from '../model/ids';
 import { STARTING_LEADER_DEFENSE } from '../model/limits';
 import { fieldCard, type MatchState, type Prompt } from '../state/state';
 import {
+  LEADER,
+  OTHER_LEADER,
   WARD_FOLLOWER,
   atFirstMainPhase,
   defaultAnswer,
@@ -16,10 +25,13 @@ import {
   testCatalog,
   type Run,
 } from '../testing/support';
-import { InvalidDeckError } from './create';
+import { InvalidDeckError, createMatch } from './create';
 import { confirmationTiming } from './confirmation';
 import { reduce } from './reduce';
 import { Transcript } from './transcript';
+import { textHash } from '../abilities/generic';
+import { cardKey, type CardCatalog } from '../model/cards';
+import type { CardScript } from '../abilities/spec';
 
 const promptOf = (state: MatchState): Prompt => {
   if (!state.prompt) throw new Error('Expected an open prompt');
@@ -103,6 +115,37 @@ describe('creating a match (CR 6.2.1)', () => {
     }
     // 14 distinct names x 3 copies: random neighbours match ~5% of the time, grouped ones ~67%.
     expect(sameCard / neighbours).toBeLessThan(0.15);
+  });
+
+  it('pins a script onto a reprint whose text is listed in alsoHashes', () => {
+    const defId = asCardDefId('test-follower-0');
+    const reprint = '[fanfare] Draw a card.';
+    const catalog: CardCatalog = (id) => {
+      const base = testCatalog(id);
+      if (!base || id !== defId) return base;
+      return { ...base, text: reprint };
+    };
+    const script: CardScript = {
+      key: cardKey('Test Follower 0'),
+      name: 'Test Follower 0',
+      textHash: textHash('fanfare Draw a card.'),
+      alsoHashes: [textHash(reprint)],
+      abilities: [
+        {
+          kind: 'triggered',
+          key: 'fanfare',
+          on: 'fanfare',
+          effect: [{ op: 'draw', n: 1 }],
+        },
+      ],
+    };
+    const created = createMatch({
+      seed: 'also-hashes-pin',
+      catalog,
+      scripts: (def) => (def.id === defId ? script : null),
+      players: [{ deck: legalDeck(LEADER) }, { deck: legalDeck(OTHER_LEADER) }],
+    });
+    expect(created.state.scripts[defId]?.abilities[0]).toMatchObject({ on: 'fanfare' });
   });
 });
 

@@ -57,8 +57,12 @@ export function stateFromCreation(event: MatchCreated): MatchState {
 
   const scripts: Record<CardDefId, CardScript> = {};
   const pin = (def: (typeof event.defs)[number]) => {
+    // Reprints keep the same key with different markup; `alsoHashes` is the rest of that family.
+    const hash = textHash(def.text);
     const script = event.scripts.find(
-      (entry) => entry.key === def.key && entry.textHash === textHash(def.text),
+      (entry) =>
+        entry.key === def.key &&
+        (entry.textHash === hash || entry.alsoHashes?.includes(hash) === true),
     );
     if (script) scripts[def.id] = script;
   };
