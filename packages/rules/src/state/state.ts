@@ -194,6 +194,8 @@ export interface TurnFlags {
   readonly ubExecuted: number;
   readonly chosenModes: readonly string[];
   readonly fusedThisTurn: number;
+  /** Cards that left your field for your hand this turn. */
+  readonly returnedFromField: readonly CardId[];
 }
 
 export const ZERO_TURN_FLAGS: TurnFlags = {
@@ -208,6 +210,7 @@ export const ZERO_TURN_FLAGS: TurnFlags = {
   ubExecuted: 0,
   chosenModes: [],
   fusedThisTurn: 0,
+  returnedFromField: [],
 };
 
 export interface ZoneLimits {

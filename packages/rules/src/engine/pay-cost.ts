@@ -3,7 +3,7 @@ import { definitionOf } from '../state/state';
 import { costParts } from '../abilities/costs';
 import type { Cost } from '../abilities/spec';
 import { gather, matchesFilter } from '../abilities/filters';
-import { engage } from './verbs';
+import { discard, engage } from './verbs';
 import { moveCards, payPlayPoints, updateFieldCard, zoneOf } from './move';
 import type { Transcript } from './transcript';
 
@@ -39,15 +39,7 @@ export function payAbilityCost(t: Transcript, seat: Seat, card: CardId, cost: Co
         matchesFilter(t.state, id, part.discard.filter, card),
       );
       const picked = candidates.slice(0, part.discard.n);
-      if (picked.length > 0) {
-        moveCards(t, {
-          owner: seat,
-          cards: picked,
-          from: { zone: 'hand', seat },
-          to: { zone: 'cemetery', seat },
-          cause: 'discard',
-        });
-      }
+      if (picked.length > 0) discard(t, seat, picked, card);
     }
     if ('reveal' in part) {
       const picked = t.state.seats[seat].hand

@@ -12,6 +12,7 @@ import type { Replacement, Restriction, StaticAbility } from './spec';
 import { evaluateCondition, evaluateValue } from './values';
 import { matchesFilter } from './filters';
 import { parseEvolveCost } from './generic';
+import { locate } from '../state/zones';
 
 export function staticsInZone(
   state: MatchState,
@@ -161,13 +162,32 @@ export function playDiscountsFor(state: MatchState, card: CardId): readonly Play
   );
 }
 
+/**
+ * Cost statics on the card being played still apply after it has moved to resolution. Payment
+ * happens there, and the reduction was printed on the card in hand or the EX area.
+ */
+function costStatics(state: MatchState, card: CardId) {
+  const live = activeStatics(state);
+  if (locate(state, card)?.zone !== 'resolution') return live;
+  const owner = state.cards[card]?.owner;
+  const script = state.scripts[definitionOf(state, card).id];
+  if (owner === undefined || !script) return live;
+  const own = script.abilities.flatMap((ability) => {
+    if (ability.kind !== 'static' || (!ability.costDelta && !ability.costIf)) return [];
+    if (!ability.validIn.some((zone) => zone === 'hand' || zone === 'ex')) return [];
+    return [{ source: card, seat: owner, ability }];
+  });
+  return [...live, ...own];
+}
+
 export function staticPlayCost(state: MatchState, card: CardId): number {
   const def = definitionOf(state, card);
   let cost = def.cost;
   const owner = state.cards[card]?.owner;
   if (owner === undefined) return Math.max(0, cost);
+  const statics = costStatics(state, card);
 
-  for (const entry of activeStatics(state)) {
+  for (const entry of statics) {
     if (entry.seat !== owner) continue;
     if (!staticLive(state, entry)) continue;
     const { ability } = entry;
@@ -175,7 +195,7 @@ export function staticPlayCost(state: MatchState, card: CardId): number {
       cost = ability.costIf.amount;
     }
   }
-  for (const entry of activeStatics(state)) {
+  for (const entry of statics) {
     if (entry.seat !== owner) continue;
     if (!staticLive(state, entry)) continue;
     const delta = entry.ability.costDelta;
@@ -189,7 +209,7 @@ export function staticPlayCost(state: MatchState, card: CardId): number {
       );
       if (matching.length + 1 !== delta.nthSpell) continue;
     }
-    cost += delta.amount;
+    cost += evaluateValue(state, owner, delta.amount, {}, entry.source);
   }
   const thisTurn = state.costDeltas[card] ?? [];
   cost += thisTurn.reduce((sum, entry) => sum + entry.amount, 0);
@@ -270,7 +290,8 @@ export function modifiedDamage(
       if (!applies) continue;
       if (replacement.instead === 'prevent') return 0;
       if (replacement.instead === 'modify' && replacement.amount !== undefined) {
-        amount = evaluateValue(state, entry.seat, replacement.amount, {}, entry.source);
+        const next = evaluateValue(state, entry.seat, replacement.amount, {}, entry.source);
+        amount = replacement.cap ? Math.min(amount, next) : next;
       }
     }
   }

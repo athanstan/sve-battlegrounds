@@ -310,7 +310,7 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
             if (top?.kind === 'resolveAbility') {
               updateWork(t, {
                 ...top,
-                vars: { ...current.vars, __chooseOne: current.chosenModes[0] },
+                vars: { ...current.vars, __from: current.from, __chooseOne: current.chosenModes[0] },
               });
             }
             return null;
@@ -331,7 +331,7 @@ export function tickPlayCard(t: Transcript, frame: PlayCardFrame): PromptRequest
             if (top?.kind === 'resolveAbility') {
               updateWork(t, {
                 ...top,
-                vars: { ...current.vars, __chooseOne: current.chosenModes[0] },
+                vars: { ...current.vars, __from: current.from, __chooseOne: current.chosenModes[0] },
               });
             }
             return null;
@@ -398,7 +398,7 @@ export function answerPlayCard(
     if (picked.length < prompt.min || picked.length > prompt.max) return REJECTED;
     // Revealing shows the cards and leaves them where they are; discarding moves them.
     if ('reveal' in part) t.emit({ type: 'cardsRevealed', seat: frame.seat, cards: picked });
-    else discard(t, frame.seat, picked);
+    else discard(t, frame.seat, picked, frame.card);
     updateWork(t, {
       ...frame,
       vars: {
@@ -456,7 +456,7 @@ export function answerPlayCard(
         });
       }
     } else {
-      discard(t, frame.seat, intent.choice.cards);
+      discard(t, frame.seat, intent.choice.cards, frame.card);
     }
     updateWork(t, {
       ...frame,
@@ -492,7 +492,10 @@ export function answerPlayCard(
       });
       const top = t.state.work[t.state.work.length - 1];
       if (top?.kind === 'resolveAbility') {
-        updateWork(t, { ...top, vars: { ...frame.vars, __chooseOne: frame.chosenModes[0] } });
+        updateWork(t, {
+          ...top,
+          vars: { ...frame.vars, __from: frame.from, __chooseOne: frame.chosenModes[0] },
+        });
       }
     }
     return { accepted: true, followUp: null };

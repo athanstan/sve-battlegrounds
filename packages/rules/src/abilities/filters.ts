@@ -89,6 +89,13 @@ export function matchesFilter(
       return false;
     }
   }
+  if (filter.nameIncludes) {
+    const needle = filter.nameIncludes.toLowerCase();
+    const script = state.scripts[printed.id];
+    const aliases = script?.alsoNamed ?? [];
+    const names = [def.name, printed.name, ...aliases];
+    if (!names.some((name) => name.toLowerCase().includes(needle))) return false;
+  }
   if (filter.cardClass && def.cardClass !== filter.cardClass) return false;
   if (filter.costAtMost !== undefined && printed.cost > filter.costAtMost) return false;
   if (filter.costIs !== undefined && printed.cost !== filter.costIs) return false;

@@ -363,3 +363,41 @@ describe('a cemetery-banish extra cost (Dimension Shift)', () => {
     expect(settled.state.seats[prepared.seat].resources.playPoints).toBe(0);
   });
 });
+
+describe('a cost reduction attached to one card', () => {
+  it('is still charged at the reduced price after the card moves into resolution', () => {
+    const run = atFirstMainPhase('ex-cost-delta');
+    const prepared = withHand(
+      run,
+      [
+        {
+          id: 'tome',
+          def: 'test-follower-2',
+          patch: { kind: 'spell', attack: null, defense: null, cost: 3, text: '' },
+          script: scriptFor('Test Follower 2', '', [{ kind: 'spell', key: 'spell', effect: [] }]),
+        },
+      ],
+      3,
+    );
+    const { seat } = prepared;
+    const id = asCardId('tome');
+    const mine = prepared.run.state.seats[seat];
+    const seated = { ...mine, hand: mine.hand.filter((card) => card !== id), ex: [...mine.ex, id] };
+    const crafted: MatchState = {
+      ...prepared.run.state,
+      costDeltas: { [id]: [{ amount: -3, until: 'endOfTurn' }] },
+      seats: seat === 0 ? [seated, prepared.run.state.seats[1]] : [prepared.run.state.seats[0], seated],
+    };
+    const prompted: MatchState = {
+      ...crafted,
+      prompt: { ...promptOf(crafted), kind: 'main', options: legalMainOptions(crafted, seat) },
+    };
+    expect(playable(prompted, 'tome')).toMatchObject({ type: 'play', cost: 0, from: 'ex' });
+
+    const after = playUntil(play({ state: prompted, events: prepared.run.events }, seat, 'tome'), (state) =>
+      state.prompt?.kind === 'main',
+    );
+    expect(after.state.seats[seat].resources.playPoints).toBe(3);
+    expect(after.state.seats[seat].cemetery).toContain(id);
+  });
+});

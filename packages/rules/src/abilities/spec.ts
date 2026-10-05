@@ -1,4 +1,5 @@
 import type { CardClass, CardKind, Keyword } from '../model/cards';
+import type { MoveCause } from '../state/zones-model';
 
 /** Whose cards an instruction talks about, from the controller's point of view. */
 export type Who = 'you' | 'opponent' | 'any';
@@ -19,6 +20,8 @@ export interface CardFilter {
   readonly name?: string;
   readonly names?: readonly string[];
   readonly nameNot?: string;
+  /** Printed name contains this text, ignoring case. */
+  readonly nameIncludes?: string;
   readonly sameNameAs?: string;
   readonly among?: string;
   readonly costAtMost?: number;
@@ -96,6 +99,7 @@ export type Value =
   | { readonly counters: string; readonly on?: string }
   | { readonly minus: readonly [Value, Value] }
   | { readonly times: readonly [Value, Value] }
+  | { readonly neg: Value }
   | { readonly min: readonly Value[] }
   | { readonly max: readonly Value[] }
   | { readonly result: string };
@@ -123,7 +127,9 @@ export type Condition =
   | { readonly did: string }
   | { readonly equal: readonly [Value, Value] }
   | { readonly superEvolutionPointsAtMost: number }
-  | { readonly die: { readonly atLeast?: number; readonly atMost?: number; readonly is?: number } };
+  | { readonly die: { readonly atLeast?: number; readonly atMost?: number; readonly is?: number } }
+  | { readonly playedFrom: string }
+  | { readonly returnedFromField: CardFilter };
 
 export type CountSpec = number | { readonly upTo: number } | 'any';
 
@@ -133,7 +139,8 @@ export interface LookPick {
   readonly upTo?: number;
   readonly n?: number;
   readonly reveal: boolean;
-  readonly then: 'hand';
+  readonly then: 'hand' | 'field' | 'ex' | 'top';
+  readonly costDeltaThisTurn?: number;
 }
 
 export type Instr =
@@ -144,6 +151,8 @@ export type Instr =
       readonly filter?: CardFilter;
       readonly count: CountSpec;
       readonly target?: true;
+      /** Printed costs of the chosen cards may not add up to more than this. */
+      readonly costAtMostTotal?: number;
     }
   | {
       readonly op: 'search';
@@ -152,6 +161,7 @@ export type Instr =
       readonly count: number;
       readonly reveal: boolean;
       readonly then: 'hand' | 'field' | 'ex';
+      readonly costDeltaThisTurn?: number;
     }
   | {
       readonly op: 'lookTop';
@@ -179,6 +189,10 @@ export type Instr =
       readonly cards: string;
       readonly to: 'hand' | 'field' | 'ex' | 'cemetery' | 'banished';
       readonly costDeltaThisTurn?: number;
+      /** How long `costDeltaThisTurn` lasts. Omitted means this turn. `null` stays until the card moves. */
+      readonly costUntil?: 'endOfTurn' | 'endOfYourTurn' | 'startOfYourNextTurn' | null;
+      /** `ex` and `field` go to the card's owner instead of the ability's controller. */
+      readonly whose?: 'owner';
     }
   | { readonly op: 'token'; readonly name: string; readonly n: number; readonly to: 'field' | 'ex' }
   | {
@@ -389,6 +403,9 @@ export interface EventPattern {
   readonly from?: Place;
   readonly to?: Place;
   readonly who?: Who;
+  readonly cause?: MoveCause;
+  /** The card whose ability discarded or moved these, when the event records one. */
+  readonly by?: CardFilter;
   readonly self?: boolean;
   readonly at?: 'startOfTurn' | 'startOfMainPhase' | 'startOfEndPhase';
   readonly whose?: 'yours' | 'opponents' | 'each';
@@ -426,6 +443,8 @@ export interface ActivatedAbility {
   readonly evolveEquivalent?: 'evolve' | 'serve';
   readonly perTurn?: number;
   readonly label: string;
+  /** Where this ability can be activated. Omitted means on the field. */
+  readonly from?: 'field' | 'cemetery';
 }
 
 export interface TriggeredAbility {
@@ -451,10 +470,12 @@ export interface StaticAbility {
   };
   readonly costDelta?: {
     readonly filter: CardFilter;
-    readonly amount: number;
+    readonly amount: Value;
     readonly nthSpell?: number;
     readonly if?: Condition;
   };
+  /** Evolve is legal only while this is true. */
+  readonly evolveIf?: Condition;
   readonly playRestriction?: Condition;
   readonly notFromEx?: true;
   readonly costIf?: { readonly cond: Condition; readonly amount: number };
@@ -482,6 +503,8 @@ export interface Replacement {
   readonly would: 'takeDamage' | 'dealDamage' | 'draw' | 'destroy';
   readonly instead: 'prevent' | 'modify';
   readonly amount?: Value;
+  /** `modify` becomes "no higher than `amount`" instead of replacing the damage. */
+  readonly cap?: true;
   readonly next?: true;
   readonly until?: 'endOfTurn' | 'endOfYourTurn' | 'startOfYourNextTurn';
 }

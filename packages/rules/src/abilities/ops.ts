@@ -20,7 +20,7 @@ import type { CardFilter, Instr, LookPick, Place } from './spec';
 import { asCardIds, countOf, gather, matchesFilter } from './filters';
 import { evaluateCondition, evaluateValue } from './values';
 import { evolveFollower } from '../engine/evolve';
-import { refOf } from '../state/state';
+import { definitionOf, refOf } from '../state/state';
 import { updateWork } from '../engine/stack';
 import { answerFamilyOp, runFamilyOp } from './families';
 import { hasRestriction, wouldBeReplaced } from './statics';
@@ -213,14 +213,34 @@ function settleLookTop(
   if (lookGroups(instr).some((group) => group.reveal) && picked.length > 0) {
     t.emit({ type: 'cardsRevealed', seat, cards: picked });
   }
-  if (picked.length > 0) {
-    moveCards(t, {
-      owner: seat,
-      cards: picked,
-      from: { zone: 'deck', seat },
-      to: { zone: 'hand', seat },
-      cause: 'look',
-    });
+  const groups = lookGroups(instr);
+  const dest = groups.every((group) => group.then === groups[0]?.then)
+    ? (groups[0]?.then ?? 'hand')
+    : 'hand';
+  const discount = groups.length === 1 ? groups[0]?.costDeltaThisTurn : undefined;
+  if (picked.length > 0 && dest !== 'top') {
+    const fit =
+      dest === 'field' || dest === 'ex' ? picked.slice(0, roomFor(t, seat, dest)) : picked;
+    if (fit.length > 0) {
+      moveCards(t, {
+        owner: seat,
+        cards: fit,
+        from: { zone: 'deck', seat },
+        to: { zone: dest, seat },
+        cause: 'look',
+        ...(dest === 'field' ? { enteredTurn: t.state.turn, placement: 'reserved' as const } : {}),
+      });
+      if (discount) {
+        for (const id of fit) {
+          t.emit({
+            type: 'costDeltaApplied',
+            card: id,
+            amount: discount,
+            until: 'endOfTurn',
+          });
+        }
+      }
+    }
   }
   if (rest.length > 0 && instr.rest === 'bottom') {
     moveCards(t, {
@@ -399,7 +419,7 @@ export function runOp(
           : { kind: 'ok', frame: instr.as ? withVars(frame, { [instr.as]: [] }) : frame };
       }
       if (candidates.length === n) {
-        discard(t, chooser, candidates);
+        discard(t, chooser, candidates, frame.source);
         return rest.length > 0
           ? { kind: 'ok', frame: after(candidates), advance: false }
           : { kind: 'ok', frame: instr.as ? withVars(frame, { [instr.as]: candidates }) : frame };
@@ -420,19 +440,27 @@ export function runOp(
     case 'move': {
       const cards = instr.cards === 'self' ? [frame.source] : asCardIds(frame.vars, instr.cards);
       const kept =
-        instr.to === 'field' || instr.to === 'ex'
-          ? cards.slice(0, roomFor(t, seat, instr.to))
-          : cards;
+        instr.whose === 'owner' || (instr.to !== 'field' && instr.to !== 'ex')
+          ? cards
+          : cards.slice(0, roomFor(t, seat, instr.to));
       for (const id of kept) {
         const from = locate(t.state, id);
         if (!from) continue;
         const owner = t.state.cards[id]?.owner ?? seat;
+        const destSeat = instr.whose === 'owner' ? owner : seat;
+        if (
+          (instr.to === 'field' || instr.to === 'ex') &&
+          instr.whose === 'owner' &&
+          roomFor(t, destSeat, instr.to) <= 0
+        ) {
+          continue;
+        }
         const to =
           instr.to === 'banished'
             ? ({ zone: 'banished', seat: owner } as const)
             : instr.to === 'hand' || instr.to === 'cemetery'
               ? ({ zone: instr.to, seat: owner } as const)
-              : ({ zone: instr.to, seat } as const);
+              : ({ zone: instr.to, seat: destSeat } as const);
         moveCards(t, {
           owner: from.zone === 'resolution' ? seat : from.seat,
           cards: [id],
@@ -448,7 +476,7 @@ export function runOp(
             type: 'costDeltaApplied',
             card: id,
             amount: instr.costDeltaThisTurn,
-            until: 'endOfTurn',
+            until: instr.costUntil === undefined ? 'endOfTurn' : instr.costUntil,
           });
         }
       }
@@ -463,11 +491,11 @@ export function runOp(
     case 'damage': {
       const amount = evaluateValue(t.state, seat, instr.amount, frame.vars, frame.source);
       if (amount <= 0) return { kind: 'ok', frame };
-      if (instr.to === 'enemyLeader') {
+      if (instr.to === 'enemyLeader' || instr.to === 'yourLeader') {
         dealDamage(t, {
           source: frame.source,
           target: 'leader',
-          targetSeat: opponentOf(seat),
+          targetSeat: instr.to === 'yourLeader' ? seat : opponentOf(seat),
           amount,
           combat: false,
         });
@@ -816,6 +844,13 @@ runOp.answer = (
       if (intent.choice.cards.length < prompt.min || intent.choice.cards.length > prompt.max) {
         return REJECTED;
       }
+      if (instr.costAtMostTotal !== undefined) {
+        const total = intent.choice.cards.reduce(
+          (sum, id) => sum + definitionOf(t.state, id).cost,
+          0,
+        );
+        if (total > instr.costAtMostTotal) return REJECTED;
+      }
       return { accepted: true, frame: withVars(frame, { [instr.as]: intent.choice.cards }) };
     }
     case 'search': {
@@ -846,6 +881,16 @@ runOp.answer = (
             ? { enteredTurn: t.state.turn, placement: 'reserved' as const }
             : {}),
         });
+        if (instr.costDeltaThisTurn) {
+          for (const id of fit) {
+            t.emit({
+              type: 'costDeltaApplied',
+              card: id,
+              amount: instr.costDeltaThisTurn,
+              until: 'endOfTurn',
+            });
+          }
+        }
       }
       shuffleDeck(t, seat);
       refreshDerived(t);
@@ -875,7 +920,7 @@ runOp.answer = (
       if (intent.type !== 'choose' || intent.choice.kind !== 'selectCards') return REJECTED;
       if (prompt.kind !== 'selectCards') return REJECTED;
       if (!isSelection(intent.choice.cards, prompt.candidates, prompt.min)) return REJECTED;
-      discard(t, prompt.seat, intent.choice.cards);
+      discard(t, prompt.seat, intent.choice.cards, frame.source);
       const restRaw = frame.vars.__discardRemaining;
       const rest = Array.isArray(restRaw)
         ? restRaw.filter((value): value is Seat => value === 0 || value === 1).slice(1)

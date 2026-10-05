@@ -104,13 +104,30 @@ export function legalPlayOptions(state: MatchState, seat: Seat): readonly MainOp
 export function legalActivateOptions(state: MatchState, seat: Seat): readonly MainOption[] {
   const options: MainOption[] = [];
   const { playPoints } = state.seats[seat].resources;
-  for (const card of state.seats[seat].field) {
-    if (isBoxed(card, state.turn)) continue;
+  const cards = [
+    ...state.seats[seat].field.map((card) => ({
+      id: card.id,
+      onField: true,
+      placement: card.placement,
+      boxed: isBoxed(card, state.turn),
+    })),
+    ...state.seats[seat].cemetery.map((id) => ({
+      id,
+      onField: false,
+      placement: undefined,
+      boxed: false,
+    })),
+  ];
+  for (const card of cards) {
+    if (card.boxed) continue;
     const def = effectiveDefinition(state, card.id);
     const script = state.scripts[def.id] ?? state.scripts[definitionOf(state, card.id).id];
     if (!script) continue;
     for (const ability of script.abilities) {
       if (ability.kind !== 'activated' || ability.evolveEquivalent) continue;
+      const from = ability.from ?? 'field';
+      if (from === 'field' && !card.onField) continue;
+      if (from === 'cemetery' && card.onField) continue;
       if (ability.condition && !evaluateCondition(state, seat, ability.condition, {}, card.id)) {
         continue;
       }
@@ -124,7 +141,7 @@ export function legalActivateOptions(state: MatchState, seat: Seat): readonly Ma
       if (!canPayCost(state, seat, card.id, ability.cost)) continue;
       if (cost > playPoints) continue;
       if (costEngages(ability.cost) && card.placement !== 'reserved') continue;
-      if (costBuriesSelf(ability.cost) && locate(state, card.id)?.zone !== 'field') continue;
+      if (costBuriesSelf(ability.cost) && !card.onField) continue;
       options.push({
         type: 'activate',
         card: card.id,
@@ -196,6 +213,17 @@ export function legalAttackOptions(state: MatchState, seat: Seat): readonly Main
   return options;
 }
 
+function evolveAllowed(state: MatchState, seat: Seat, card: CardId): boolean {
+  const def = definitionOf(state, card);
+  const script = state.scripts[def.id];
+  if (!script) return true;
+  for (const ability of script.abilities) {
+    if (ability.kind !== 'static' || !ability.evolveIf) continue;
+    if (!evaluateCondition(state, seat, ability.evolveIf, {}, card)) return false;
+  }
+  return true;
+}
+
 export function legalEvolveOptions(state: MatchState, seat: Seat): readonly MainOption[] {
   if (state.seats[seat].flags.evolvedThisTurn) return [];
   const options: MainOption[] = [];
@@ -210,6 +238,7 @@ export function legalEvolveOptions(state: MatchState, seat: Seat): readonly Main
     const cost = evolvePlayCost(state, card.id);
     if (cost === null) continue;
     if (!correspondingEvolve(state, seat, card.id)) continue;
+    if (!evolveAllowed(state, seat, card.id)) continue;
     const canPp = playPoints >= cost;
     const canEp = evolutionPoints >= 1 && playPoints >= Math.max(0, cost - 1);
     if (canPp) {

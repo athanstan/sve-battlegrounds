@@ -87,7 +87,12 @@ export type EngineEvent =
     }
   /** Engaged cards of the seat that were turned back to reserved (7.2.3). */
   | { readonly type: 'fieldRefreshed'; readonly seat: Seat; readonly cards: readonly CardId[] }
-  | { readonly type: 'cardsDiscarded'; readonly seat: Seat; readonly cards: readonly CardId[] }
+  | {
+      readonly type: 'cardsDiscarded';
+      readonly seat: Seat;
+      readonly cards: readonly CardId[];
+      readonly by?: CardId;
+    }
   | { readonly type: 'wardsEngaged'; readonly seat: Seat; readonly cards: readonly CardId[] }
   /** A draw was required from an empty deck; rules handling will resolve the loss (5.10.1.1). */
   | { readonly type: 'drewFromEmptyDeck'; readonly seat: Seat }

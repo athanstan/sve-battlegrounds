@@ -162,7 +162,7 @@ function matchesPattern(
       if (pattern.filter && !matchesFilter(state, event.card, pattern.filter, source)) return false;
       return true;
     case 'moved':
-      return event.type === 'cardsMoved';
+      return movedMatches(state, event, controller, source, pattern);
     case 'damaged':
       return event.type === 'damageDealt';
     case 'destroyed':
@@ -197,6 +197,82 @@ function matchesPattern(
     case 'state':
       return event.type === 'leaderDefenseChanged' && event.defense <= 0;
   }
+}
+
+function movedMatches(
+  state: MatchState,
+  event: EngineEvent,
+  controller: Seat,
+  source: CardId,
+  pattern: Extract<Trigger, { whenever: unknown }>['whenever'],
+): boolean {
+  if (event.type === 'cardsDiscarded') {
+    if (pattern.cause && pattern.cause !== 'discard') return false;
+    if (pattern.self && !event.cards.includes(source)) return false;
+    if (pattern.by && (!event.by || !matchesFilter(state, event.by, pattern.by, source))) {
+      return false;
+    }
+    const ids = pattern.filter
+      ? event.cards.filter((id) => matchesFilter(state, id, pattern.filter, source))
+      : event.cards;
+    return ids.length > 0;
+  }
+  if (event.type === 'tokenCreated') {
+    if (event.zone !== 'field') return false;
+    if (pattern.to && pattern.to.zone !== 'field') return false;
+    if (pattern.to?.who === 'you' && event.seat !== controller) return false;
+    if (pattern.to?.who === 'opponent' && event.seat === controller) return false;
+    if (pattern.cause) return false;
+    const ids = event.cards.map((ref) => ref.id);
+    const matching = pattern.filter
+      ? ids.filter((id) => matchesFilter(state, id, pattern.filter, source))
+      : ids;
+    return matching.length > 0;
+  }
+  if (event.type !== 'cardsMoved') return false;
+  if (pattern.cause && event.cause !== pattern.cause) return false;
+  if (pattern.to && event.to.zone !== pattern.to.zone) return false;
+  if (pattern.to?.who === 'you' && event.to.zone !== 'resolution' && event.to.seat !== controller) {
+    return false;
+  }
+  if (
+    pattern.to?.who === 'opponent' &&
+    event.to.zone !== 'resolution' &&
+    event.to.seat === controller
+  ) {
+    return false;
+  }
+  if (pattern.from && event.from.zone !== pattern.from.zone) return false;
+  if (pattern.self && !event.cards.includes(source)) return false;
+  if (pattern.by) return false;
+  const ids = pattern.filter
+    ? event.cards.filter((id) => matchesFilter(state, id, pattern.filter, source))
+    : event.cards;
+  return ids.length > 0;
+}
+
+function entrantsOf(
+  state: MatchState,
+  event: EngineEvent,
+  controller: Seat,
+  source: CardId,
+  on: Trigger,
+): CardId[] {
+  if (typeof on !== 'object' || !('whenever' in on)) return [];
+  const pattern = on.whenever;
+  if (pattern.type !== 'moved' || pattern.self || pattern.to?.zone !== 'field') return [];
+  if (!movedMatches(state, event, controller, source, pattern)) return [];
+  if (event.type === 'tokenCreated') {
+    return event.cards
+      .map((ref) => ref.id)
+      .filter((id) => !pattern.filter || matchesFilter(state, id, pattern.filter, source));
+  }
+  if (event.type === 'cardsMoved' && event.from.zone !== 'field') {
+    return event.cards.filter(
+      (id) => !pattern.filter || matchesFilter(state, id, pattern.filter, source),
+    );
+  }
+  return [];
 }
 
 function fieldSources(state: MatchState): { id: CardId; seat: Seat }[] {
@@ -239,6 +315,8 @@ function enteredCards(
   source: CardId,
   on: Trigger,
 ): CardId[] {
+  const entrants = entrantsOf(state, event, controller, source, on);
+  if (entrants.length > 0) return entrants;
   if (typeof on !== 'object' || !('tokenEntersYourField' in on)) return [];
   if (event.type === 'tokenCreated') {
     if (event.seat !== controller || event.zone !== 'field') return [];
@@ -329,16 +407,21 @@ export function scanTriggers(t: Transcript, event: EngineEvent): void {
     }
   }
 
-  const sources =
-    event.type === 'cardsMoved' && event.from.zone === 'field'
-      ? [
-          ...fieldSources(t.state),
-          ...event.cards.map((id) => ({
-            id,
-            seat: controllerOf(t.state, id) ?? (event.from.zone === 'field' ? event.from.seat : 0),
-          })),
-        ]
-      : fieldSources(t.state);
+  const arrived =
+    event.type === 'cardsMoved'
+      ? event.cards.map((id) => ({
+          id,
+          seat:
+            event.from.zone === 'field'
+              ? event.from.seat
+              : (controllerOf(t.state, id) ?? (event.to.zone === 'resolution' ? 0 : event.to.seat)),
+        }))
+      : event.type === 'cardsDiscarded'
+        ? event.cards.map((id) => ({ id, seat: event.seat }))
+        : event.type === 'tokenCreated'
+          ? event.cards.map((ref) => ({ id: ref.id, seat: event.seat }))
+          : [];
+  const sources = [...fieldSources(t.state), ...arrived];
 
   const seen = new Set<string>();
   for (const { id, seat } of sources) {
@@ -353,14 +436,45 @@ export function scanTriggers(t: Transcript, event: EngineEvent): void {
     const effective = effectiveDefinition(t.state, id);
     const sourceDef = effective.id;
     for (const ability of abilitiesOn(t.state, sourceDef)) {
+      const selfMove =
+        typeof ability.on === 'object' &&
+        'whenever' in ability.on &&
+        ability.on.whenever.self === true;
       if (
         !validHere(t.state, id, ability) &&
         ability.on !== 'lastWords' &&
-        ability.on !== 'fanfare'
+        ability.on !== 'fanfare' &&
+        !selfMove
       ) {
         continue;
       }
-      if (ability.on === 'fanfare') continue; // Fanfare is the play pipeline, not the pending pool.
+      if (ability.on === 'fanfare') {
+        if (
+          event.type === 'cardsMoved' &&
+          event.to.zone === 'field' &&
+          event.from.zone !== 'field' &&
+          event.cards.includes(id) &&
+          (event.cause === 'search' ||
+            event.cause === 'effect' ||
+            event.cause === 'summon' ||
+            event.cause === 'look' ||
+            event.cause === 'token')
+        ) {
+          if (!capReached(t.state, seat, ability)) {
+            t.emit({
+              type: 'abilityPending',
+              id: t.state.nextPendingId,
+              seat,
+              source: id,
+              sourceDef,
+              abilityKey: ability.key,
+              triggerSeq: t.state.seq,
+              vars: { __from: event.from.zone },
+            });
+          }
+        }
+        continue;
+      }
       enqueue(t, seat, id, sourceDef, ability, event);
     }
     const granted = loc?.card.grantedAbilities ?? [];

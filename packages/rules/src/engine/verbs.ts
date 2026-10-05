@@ -21,8 +21,13 @@ export function draw(t: Transcript, seat: Seat, count: number, cause: DrawCause)
 }
 
 /** Discard (5.12): hand to cemetery. */
-export function discard(t: Transcript, seat: Seat, cards: readonly CardId[]): void {
-  if (cards.length > 0) t.emit({ type: 'cardsDiscarded', seat, cards });
+export function discard(
+  t: Transcript,
+  seat: Seat,
+  cards: readonly CardId[],
+  by?: CardId,
+): void {
+  if (cards.length > 0) t.emit({ type: 'cardsDiscarded', seat, cards, ...(by ? { by } : {}) });
 }
 
 /** Refresh (5.4): turn engaged field cards back to reserved. Boxed followers skip this. */

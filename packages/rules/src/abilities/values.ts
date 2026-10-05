@@ -136,6 +136,9 @@ export function evaluateValue(
         evaluateValue(state, controller, value.minus[1], vars, self),
     );
   }
+  if ('neg' in value) {
+    return -evaluateValue(state, controller, value.neg, vars, self);
+  }
   if ('times' in value) {
     return (
       evaluateValue(state, controller, value.times[0], vars, self) *
@@ -242,6 +245,14 @@ export function evaluateCondition(
   if ('superEvolutionPointsAtMost' in cond) {
     return (
       state.seats[controller].resources.superEvolutionPoints <= cond.superEvolutionPointsAtMost
+    );
+  }
+  if ('playedFrom' in cond) {
+    return vars.__from === cond.playedFrom;
+  }
+  if ('returnedFromField' in cond) {
+    return state.seats[controller].flags.returnedFromField.some((id) =>
+      matchesFilter(state, id, cond.returnedFromField, self),
     );
   }
   if ('die' in cond) {

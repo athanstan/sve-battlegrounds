@@ -233,15 +233,21 @@ function putInto(
   });
 }
 
-/** 4.1.4: a card that changes zones is a new card; drop this-turn cost deltas except EX→field and resolution→field. */
+/**
+ * 4.1.4: a card that changes zones is a new card, so a this-turn cost change leaves it.
+ * Two moves keep it. Summoning from the EX area or from resolution onto the field is still
+ * that play. Moving from hand or the EX area into resolution is the play itself, and payment
+ * happens only after that move, so the reduction has to still be there when the points are spent.
+ */
 function clearCostDeltas(
   state: MatchState,
   cards: readonly CardId[],
   from: ZoneRef,
   to: ZoneRef,
 ): MatchState {
-  const keep = (from.zone === 'ex' || from.zone === 'resolution') && to.zone === 'field';
-  if (keep) return state;
+  const arriving = (from.zone === 'ex' || from.zone === 'resolution') && to.zone === 'field';
+  const beingPlayed = (from.zone === 'hand' || from.zone === 'ex') && to.zone === 'resolution';
+  if (arriving || beingPlayed) return state;
   const next = state.costDeltas;
   let changed = false;
   const copy = { ...next };
@@ -416,7 +422,17 @@ function apply(state: MatchState, event: EngineEvent): MatchState {
         }
         put = { ...put, cards };
       }
-      return clearCostDeltas(put, event.cards, event.from, event.to);
+      const moved =
+        event.from.zone === 'field' && event.to.zone === 'hand'
+          ? updateSeat(put, event.from.seat, (seat) => ({
+              ...seat,
+              flags: {
+                ...seat.flags,
+                returnedFromField: [...seat.flags.returnedFromField, ...event.cards],
+              },
+            }))
+          : put;
+      return clearCostDeltas(moved, event.cards, event.from, event.to);
     }
 
     case 'cardsRevealed':
