@@ -1,4 +1,4 @@
-import type { CardId, CardRef, ResourceName, Seat } from '@sve/rules';
+import type { CardDefId, CardId, CardRef, ResourceName, Seat } from '@sve/rules';
 import { type Container, Sprite } from 'pixi.js';
 import type { Cue } from '../cues';
 import {
@@ -21,6 +21,7 @@ import {
   type Resource,
 } from './actors';
 import type { Motion } from './motion';
+import { isPulsing } from './pacing';
 
 /**
  * The board: a pool of actors kept in step with a `Layout`.
@@ -41,6 +42,11 @@ export interface BoardDeps {
   readonly layers: BoardLayers;
   readonly art: Art;
   readonly motion: Motion;
+  /**
+   * The board changed in a way no tween announces: a new layout, a selection, a highlight, a
+   * face that has just arrived. A frame has to be drawn for it.
+   */
+  readonly invalidate: () => void;
   /** A card the viewer is allowed to pick was clicked. */
   readonly onPick: (id: CardId) => void;
   readonly onCardPress?: (id: CardId, at: { x: number; y: number }) => void;
@@ -81,7 +87,9 @@ export class Board {
   /** The card under the pointer, and where the pointer last was, for the inspector. */
   #hovered: CardActor | null = null;
   #hoverAt = { x: 0, y: 0 };
-  readonly #reveals: Sprite[] = [];
+  /** A reveal holds the face it was given. That face is replaced when art arrives, so the sprite
+   *  must be pointed at the new texture before the old one is destroyed. */
+  readonly #reveals: { readonly sprite: Sprite; readonly def: CardDefId }[] = [];
 
   constructor(deps: BoardDeps) {
     this.#deps = deps;
@@ -95,6 +103,7 @@ export class Board {
     this.#applyCards(layout, instant);
     this.#applyHud(layout);
     this.#paintSelection();
+    this.#deps.invalidate();
   }
 
   /** Something happened that a view cannot show: a shuffle, a failed draw, a resource change. */
@@ -153,19 +162,39 @@ export class Board {
   setSelection(spec: SelectionSpec | null, picked: readonly CardId[]): void {
     this.#selection = spec ? { spec, picked } : null;
     this.#paintSelection();
+    this.#deps.invalidate();
   }
 
   setHighlight(ids: readonly CardId[], leaders: readonly Seat[] = []): void {
     this.#highlight = new Set(ids);
     this.#leaderTargets = new Set(leaders);
     this.#paintSelection();
+    this.#deps.invalidate();
   }
 
   /** A face the catalog just learned about (or finished loading art for) is redrawn. */
   refreshFaces(): void {
     for (const actor of this.#cards.values()) actor.refresh();
     for (const avatar of this.#avatars.values()) avatar.update(avatar.slot);
+    for (const reveal of this.#reveals) {
+      reveal.sprite.texture = this.#deps.art.textures.face(
+        reveal.def,
+        this.#deps.art.onFaceChange,
+      );
+    }
     this.#deps.art.textures.flushStale();
+    this.#deps.invalidate();
+  }
+
+  /**
+   * Is something on the board pulsing on its own clock? A legal target's glow and the ring of a
+   * leader the match is waiting on breathe with the time, not with a tween.
+   */
+  pulsing(): boolean {
+    return isPulsing(
+      Array.from(this.#cards.values(), (actor) => actor.highlight),
+      Array.from(this.#avatars.values(), (avatar) => avatar.slot.waiting),
+    );
   }
 
   /** Per frame. */
@@ -483,12 +512,14 @@ export class Board {
       sprite.scale.set(1.35);
       sprite.eventMode = 'none';
       this.#deps.layers.cards.addChild(sprite);
-      this.#reveals.push(sprite);
+      this.#reveals.push({ sprite, def: ref.def });
       this.#deps.motion.to(sprite, {
         alpha: 0,
         duration: 1.6,
         delay: 0.9,
         onComplete: () => {
+          const index = this.#reveals.findIndex((entry) => entry.sprite === sprite);
+          if (index >= 0) this.#reveals.splice(index, 1);
           if (!sprite.destroyed) sprite.destroy();
         },
       });
@@ -496,7 +527,7 @@ export class Board {
   }
 
   #clearReveals(): void {
-    for (const sprite of this.#reveals.splice(0)) {
+    for (const { sprite } of this.#reveals.splice(0)) {
       this.#deps.motion.kill(sprite);
       if (!sprite.destroyed) sprite.destroy();
     }

@@ -9,6 +9,7 @@ import { computeLayout, type Layout, type PileKind } from './layout';
 import { Board } from './scene/board';
 import { Floor } from './scene/floor';
 import { Motion } from './scene/motion';
+import { Pacer } from './scene/pacing';
 import { sameSpec, toggle, type SelectionSpec } from './selection';
 import { COLOR, DESIGN, FONT_FACES } from './theme';
 
@@ -61,6 +62,7 @@ interface Scene {
   readonly textures: CardTextures;
   readonly hud: HudTextures;
   readonly board: Board;
+  readonly pacer: Pacer;
   readonly tick: (ticker: { lastTime: number }) => void;
 }
 
@@ -79,6 +81,8 @@ export class Playmat {
   /** The newest view, kept so a late scene or a camera change can show it. */
   #view: MatchView | null = null;
   #shown = false;
+  /** How dark the game-over dim was last asked to be. */
+  #dimmed = 0;
   #spec: SelectionSpec | null = null;
   #picked: readonly CardId[] = [];
   #highlight: readonly CardId[] = [];
@@ -99,6 +103,8 @@ export class Playmat {
       this.#motionQuery.addEventListener('change', this.#onMotionPreference);
     }
     this.#motion = new Motion(!(options.reducedMotion ?? this.#motionQuery?.matches ?? false));
+    // A tween starting, or a value being set outright, is a change that needs a frame.
+    this.#motion.onChange = () => this.#wake();
     this.ready = this.#start();
   }
 
@@ -162,6 +168,7 @@ export class Playmat {
     if (!scene) return;
     scene.floor.setCamera(this.#camera);
     if (this.#view) this.#show(scene, this.#view, [], false);
+    this.#wake();
   }
 
   get camera(): Camera {
@@ -198,6 +205,8 @@ export class Playmat {
       antialias: true,
       autoDensity: true,
       resolution: Math.min(globalThis.devicePixelRatio || 1, MAX_RESOLUTION),
+      // Nothing is on the canvas until the scene is built; the pacer starts the ticker then.
+      autoStart: false,
     });
     if (this.#destroyed) {
       app.destroy(true, { children: true });
@@ -256,6 +265,7 @@ export class Playmat {
         },
       },
       motion: this.#motion,
+      invalidate: () => this.#wake(),
       onPick: (id) => {
         if (this.#spec) this.#setPicked(toggle(this.#picked, id, this.#spec));
       },
@@ -265,17 +275,28 @@ export class Playmat {
       onCardHover: (ref, at) => this.#options.onCardHover?.(ref, at),
     });
 
-    const tick = (ticker: { lastTime: number }): void => board.tick(ticker.lastTime);
+    // The ticker runs only while something moves (see `pacing.ts`). Pixi draws after every
+    // listener of a frame, so the frame that settles the board is still drawn before it stops.
+    const pacer = new Pacer(app.ticker, () => ({
+      tweens: this.#motion.active,
+      pulsing: board.pulsing(),
+    }));
+    const tick = (ticker: { lastTime: number }): void => {
+      board.tick(ticker.lastTime);
+      pacer.settle();
+    };
     app.ticker.add(tick);
     app.renderer.on('resize', () => {
       if (this.#scene) this.#fit(this.#scene);
     });
 
-    return { app, world, floor, vignette, dim, textures, hud, board, tick };
+    return { app, world, floor, vignette, dim, textures, hud, board, pacer, tick };
   }
 
   #teardown(scene: Scene): void {
+    scene.pacer.close();
     scene.app.ticker.remove(scene.tick);
+    this.#motion.kill(scene.dim);
     scene.board.destroy();
     scene.floor.destroy();
     scene.textures.destroy();
@@ -296,6 +317,12 @@ export class Playmat {
     scene.vignette.width = width;
     scene.vignette.height = height;
     scene.dim.clear().rect(0, 0, width, height).fill(0x000000);
+    scene.pacer.wake();
+  }
+
+  /** Something changed that needs drawing. Starts the ticker if it is stopped. */
+  #wake(): void {
+    this.#scene?.pacer.wake();
   }
 
   // ---- showing a view ---------------------------------------------------------------------
@@ -306,8 +333,13 @@ export class Playmat {
     for (const cue of unique(cues)) scene.board.cue(cue);
     this.#shown = true;
 
+    // Only a change of target is a tween: asking for 0 again would run the ticker for a second
+    // and a fifth on every event of a match, for a fade from nothing to nothing.
     const dimmed = layout.over ? DIM_ON_GAME_OVER : 0;
-    this.#motion.to(scene.dim, { alpha: dimmed, duration: 1.2 }, !animate);
+    if (dimmed !== this.#dimmed || !animate) {
+      this.#dimmed = dimmed;
+      this.#motion.to(scene.dim, { alpha: dimmed, duration: 1.2 }, !animate);
+    }
   }
 
   #setPicked(picked: readonly CardId[]): void {

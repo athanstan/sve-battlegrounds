@@ -62,6 +62,25 @@ const HALO = 26;
 const SHADOW_DROP = 7;
 const HALF = { width: CARD.width / 2, height: CARD.height / 2 } as const;
 
+/** A point inset from one corner of the card's quad toward its centre. */
+function onFace(corners: Corners, corner: 0 | 1 | 2 | 3, inset: number): { x: number; y: number } {
+  const x = corners[corner * 2] ?? 0;
+  const y = corners[corner * 2 + 1] ?? 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < 4; i++) {
+    cx += corners[i * 2] ?? 0;
+    cy += corners[i * 2 + 1] ?? 0;
+  }
+  return { x: x + (cx / 4 - x) * inset, y: y + (cy / 4 - y) * inset };
+}
+
+/** How big the card looks, so a number drawn on it matches that size. */
+function faceScale(corners: Corners): number {
+  const span = Math.hypot((corners[2] ?? 0) - (corners[0] ?? 0), (corners[3] ?? 0) - (corners[1] ?? 0));
+  return Math.max(0.55, Math.min(1.25, span / CARD.width));
+}
+
 const KEY_MARK: Partial<Record<Keyword, string>> = {
   ward: 'W',
   storm: 'St',
@@ -82,6 +101,67 @@ const PLATE = {
   stroke: { color: COLOR.ink, width: 3 },
 } as const;
 
+/**
+ * A number on a dark chip. Setting one to what it already shows does nothing: re-rasterising the
+ * text and redrawing the chip are the dear parts, and a card that is sitting still asks for them
+ * every frame otherwise.
+ */
+class StatChip {
+  readonly plate = new Graphics();
+  readonly label = new Text({ text: '', resolution: 2, style: PLATE, anchor: 0.5 });
+  #text = '';
+  #fill = -1;
+  #fit = Number.NaN;
+
+  get visible(): boolean {
+    return this.label.visible;
+  }
+
+  set visible(visible: boolean) {
+    this.label.visible = visible;
+    this.plate.visible = visible;
+  }
+
+  set(text: string, fill: number, at: { x: number; y: number }, fit: number): void {
+    const retyped = text !== this.#text;
+    if (retyped) {
+      this.label.text = text;
+      this.#text = text;
+    }
+    if (fill !== this.#fill) {
+      this.label.style.fill = fill;
+      this.#fill = fill;
+    }
+    if (fit !== this.#fit) {
+      this.label.scale.set(fit);
+      this.plate.scale.set(fit);
+      this.#fit = fit;
+    }
+    this.label.position.set(at.x, at.y);
+    this.plate.position.set(at.x, at.y);
+    // The chip is sized to the text and nothing else, so only new text needs it redrawn.
+    if (!retyped) return;
+    const width = Math.max(18, this.label.width / fit + 10);
+    const height = Math.max(16, this.label.height / fit + 6);
+    this.plate
+      .clear()
+      .roundRect(-width / 2, -height / 2, width, height, height / 2)
+      .fill({ color: COLOR.ink, alpha: 0.82 });
+  }
+}
+
+/** What a card's meshes were last laid out for. They are only rebuilt when it changes. */
+interface Laid {
+  camera: Camera | null;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  flat: number;
+  width: number;
+  lift: number;
+}
+
 export class CardActor extends Container {
   readonly pose: CardPose;
   slot: CardSlot;
@@ -95,14 +175,26 @@ export class CardActor extends Container {
   #face: Texture | null = null;
   #highlight: Highlight = 'none';
   #hovered = false;
-  readonly #atk: Text;
-  readonly #def: Text;
+  readonly #atk = new StatChip();
+  readonly #def = new StatChip();
   readonly #keys: Text;
   readonly #carrot: Sprite;
   readonly #carrotCount: Text;
   readonly #badge: Text;
   /** Animated 0..1 when a carrot appears. */
   readonly carrotHop = { amount: 0 };
+  #laid: Laid = {
+    camera: null,
+    x: Number.NaN,
+    y: 0,
+    scale: 0,
+    rotation: 0,
+    flat: 0,
+    width: 0,
+    lift: 0,
+  };
+  /** The rim or the glow came or went, so the meshes must be laid out even if the card did not move. */
+  #restyled = true;
 
   constructor(slot: CardSlot, art: Art) {
     super();
@@ -117,8 +209,6 @@ export class CardActor extends Container {
     this.#body = new QuadMesh(art.textures.back());
     this.#glow = new QuadMesh(art.hud.glow(COLOR.legal));
     this.#glow.visible = false;
-    this.#atk = new Text({ text: '', resolution: 2, style: PLATE, anchor: 0.5 });
-    this.#def = new Text({ text: '', resolution: 2, style: PLATE, anchor: 0.5 });
     this.#keys = new Text({
       text: '',
       resolution: 2,
@@ -139,8 +229,10 @@ export class CardActor extends Container {
       anchor: 0.5,
     });
     for (const overlay of [
-      this.#atk,
-      this.#def,
+      this.#atk.plate,
+      this.#atk.label,
+      this.#def.plate,
+      this.#def.label,
       this.#keys,
       this.#carrot,
       this.#carrotCount,
@@ -148,13 +240,28 @@ export class CardActor extends Container {
     ]) {
       overlay.eventMode = 'none';
     }
+    // The body is a mesh laid over free corners. These sit above it, on those corners.
+    this.sortableChildren = true;
+    for (const overlay of [this.#atk.plate, this.#def.plate]) overlay.zIndex = 1;
+    for (const overlay of [
+      this.#atk.label,
+      this.#def.label,
+      this.#keys,
+      this.#carrot,
+      this.#carrotCount,
+      this.#badge,
+    ]) {
+      overlay.zIndex = 2;
+    }
     this.addChild(
       this.#shadow,
       this.#rim,
       this.#body,
       this.#glow,
-      this.#atk,
-      this.#def,
+      this.#atk.plate,
+      this.#def.plate,
+      this.#atk.label,
+      this.#def.label,
       this.#keys,
       this.#carrot,
       this.#carrotCount,
@@ -190,6 +297,7 @@ export class CardActor extends Container {
     this.#face = def ? this.#art.textures.face(def, this.#art.onFaceChange) : null;
 
     this.#rim.visible = evolved !== null;
+    this.#restyled = true;
     if (evolved)
       this.#rim.texture = this.#art.hud.glow(
         evolved.superEvolved ? COLOR.superEvolution : EVOLVED_RIM,
@@ -200,6 +308,7 @@ export class CardActor extends Container {
   setHighlight(highlight: Highlight): void {
     this.#highlight = highlight;
     this.#glow.visible = highlight !== 'none';
+    this.#restyled = true;
     if (highlight !== 'none') {
       this.#glow.texture = this.#art.hud.glow(
         highlight === 'selected' ? COLOR.selected : COLOR.legal,
@@ -245,20 +354,37 @@ export class CardActor extends Container {
     const width = Math.max(0.001, Math.abs(1 - 2 * pose.flip));
 
     const camera = this.#art.camera();
-    const quad = { x, y, scale, rotation, flat, width };
-    this.#corners = cornersOf(camera, quad, HALF.width, HALF.height);
-    this.#body.setQuad(this.#corners);
+    // Laying a mesh out is the dear part, so a card that has not moved keeps what it has.
+    const laid = this.#laid;
+    if (
+      this.#restyled ||
+      laid.camera !== camera ||
+      laid.x !== x ||
+      laid.y !== y ||
+      laid.scale !== scale ||
+      laid.rotation !== rotation ||
+      laid.flat !== flat ||
+      laid.width !== width ||
+      laid.lift !== lift
+    ) {
+      this.#restyled = false;
+      Object.assign(laid, { camera, x, y, scale, rotation, flat, width, lift });
+      const quad = { x, y, scale, rotation, flat, width };
+      this.#corners = cornersOf(camera, quad, HALF.width, HALF.height);
+      this.#body.setQuad(this.#corners);
+
+      // The shadow falls toward the viewer, and further the higher the card is held.
+      const drop = (SHADOW_DROP + lift * 18) * scale;
+      const halo = { width: HALF.width + HALO, height: HALF.height + HALO };
+      this.#shadow.setQuad(cornersOf(camera, { ...quad, y: y + drop }, halo.width, halo.height));
+      if (this.#rim.visible) this.#rim.setQuad(cornersOf(camera, quad, halo.width, halo.height));
+      if (this.#highlight !== 'none') {
+        this.#glow.setQuad(cornersOf(camera, quad, halo.width, halo.height));
+      }
+    }
     this.alpha = pose.alpha;
-
-    // The shadow falls toward the viewer, and further the higher the card is held.
-    const drop = (SHADOW_DROP + lift * 18) * scale;
-    const halo = { width: HALF.width + HALO, height: HALF.height + HALO };
-    this.#shadow.setQuad(cornersOf(camera, { ...quad, y: y + drop }, halo.width, halo.height));
     this.#shadow.alpha = 0.9 - lift * 0.15;
-    if (this.#rim.visible) this.#rim.setQuad(cornersOf(camera, quad, halo.width, halo.height));
-
     if (this.#highlight !== 'none') {
-      this.#glow.setQuad(cornersOf(camera, quad, halo.width, halo.height));
       this.#glow.alpha =
         this.#highlight === 'selected' ? 1 : 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(time / 260));
     }
@@ -278,15 +404,13 @@ export class CardActor extends Container {
     this.#atk.visible = showStats;
     this.#def.visible = showStats;
     if (showStats && shown) {
-      this.#atk.text = String(shown.attack);
-      this.#def.text = String(shown.defense);
-      this.#atk.style.fill =
+      const attackFill =
         printed?.attack !== null && printed?.attack !== undefined && shown.attack > printed.attack
           ? COLOR.buffed
           : shown.attack < (printed?.attack ?? shown.attack)
             ? COLOR.danger
             : 0xffffff;
-      this.#def.style.fill =
+      const defenseFill =
         printed?.defense !== null &&
         printed?.defense !== undefined &&
         shown.defense > printed.defense
@@ -294,8 +418,11 @@ export class CardActor extends Container {
           : shown.defense < (printed?.defense ?? shown.defense)
             ? COLOR.danger
             : 0xffffff;
-      this.#atk.position.set(x - HALF.width * scale * 0.72, y + HALF.height * scale * 0.78);
-      this.#def.position.set(x + HALF.width * scale * 0.72, y + HALF.height * scale * 0.78);
+      // Field and EX cards lie flat, so the numbers have to sit on the quad itself.
+      // An upright offset lands them off the art, and a buff is then invisible.
+      const fit = faceScale(this.#corners);
+      this.#atk.set(String(shown.attack), attackFill, onFace(this.#corners, 3, 0.22), fit);
+      this.#def.set(String(shown.defense), defenseFill, onFace(this.#corners, 2, 0.22), fit);
       const marks = shown.keywords
         .map((keyword) => KEY_MARK[keyword])
         .filter(Boolean)
@@ -304,8 +431,9 @@ export class CardActor extends Container {
         .filter(([, n]) => n > 0)
         .map(([name, n]) => `${name.slice(0, 1).toUpperCase()}${n}`)
         .join(' ');
-      this.#keys.text = [marks, counters].filter((part) => part.length > 0).join(' ');
-      this.#keys.visible = this.#keys.text.length > 0;
+      const keys = [marks, counters].filter((part) => part.length > 0).join(' ');
+      if (this.#keys.text !== keys) this.#keys.text = keys;
+      this.#keys.visible = keys.length > 0;
       this.#keys.position.set(x, y - HALF.height * scale * 0.82);
     } else {
       this.#keys.visible = false;
@@ -318,7 +446,8 @@ export class CardActor extends Container {
       const hop = 1 + this.carrotHop.amount * 0.35;
       this.#carrot.scale.set(hop);
       this.#carrot.position.set(x + HALF.width * scale * 0.78, y - HALF.height * scale * 0.78);
-      this.#carrotCount.text = String(raced);
+      const count = String(raced);
+      if (this.#carrotCount.text !== count) this.#carrotCount.text = count;
       this.#carrotCount.position.set(this.#carrot.x + 8, this.#carrot.y - 4);
     }
 
@@ -526,6 +655,7 @@ export class OrbTrayActor extends Container {
   readonly #rows: Readonly<Record<Resource, Sprite[]>>;
   /** Animated by cues: a swell on the orbs of whichever resource just changed. */
   readonly pulse = { resource: 'playPoints' as Resource, amount: 0 };
+  #swollen: { resource: Resource; amount: number } | null = null;
 
   constructor(slot: OrbTraySlot, art: Art) {
     super();
@@ -572,8 +702,13 @@ export class OrbTrayActor extends Container {
   }
 
   sync(): void {
+    const { resource: pulsed, amount } = this.pulse;
+    // The swell is the only thing here that moves, and it is the same for every orb in a row.
+    const last = this.#swollen;
+    if (last?.resource === pulsed && last.amount === amount) return;
+    this.#swollen = { resource: pulsed, amount };
     for (const resource of Object.keys(this.#rows) as Resource[]) {
-      const swell = resource === this.pulse.resource ? this.pulse.amount : 0;
+      const swell = resource === pulsed ? amount : 0;
       for (const orb of this.#rows[resource]) orb.scale.set(1 + swell * 0.35);
     }
   }
